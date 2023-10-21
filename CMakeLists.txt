@@ -15,6 +15,7 @@ set(CXX_SOURCES
   third-party/imgui/imgui_widgets.cpp
   third-party/imgui/imgui_impl_opengl3.cpp
   third-party/imgui/imgui_impl_glfw.cpp
+  third-party/tinygltf/tiny_gltf.cc
 )
 
 # find_package(OpenGL REQUIRED)
@@ -24,9 +25,10 @@ add_subdirectory(third-party/glm)
 
 add_executable(${EXE_NAME} ${CXX_SOURCES})
 target_include_directories(${EXE_NAME} PRIVATE
-  third-party/glfw/include
   third-party/glad/include
+  third-party/glfw/include
   third-party/glm
   third-party/imgui
+  third-party/tinygltf
 )
 target_link_libraries(${EXE_NAME} PRIVATE glfw)
