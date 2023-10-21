@@ -2,6 +2,8 @@
 
 out vec4 color;
 
+in vec3 ogPosition;
+
 void main() {
-    color = vec4(gl_FragCoord.xy / 1000, 0, 1);
+    color = vec4(0.5 + 0.5 * ogPosition, 1);
 }

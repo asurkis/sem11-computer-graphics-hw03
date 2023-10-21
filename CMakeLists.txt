@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(EXE_NAME hw02)
 set(CXX_SOURCES
   main.cpp
+  routine.hpp
   third-party/glad/src/gl.c
   third-party/imgui/imgui.cpp
   third-party/imgui/imgui_demo.cpp
