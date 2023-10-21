@@ -19,11 +19,13 @@ set(CXX_SOURCES
 # find_package(OpenGL REQUIRED)
 
 add_subdirectory(third-party/glfw)
+add_subdirectory(third-party/glm)
 
 add_executable(${EXE_NAME} ${CXX_SOURCES})
 target_include_directories(${EXE_NAME} PRIVATE
   third-party/glfw/include
   third-party/glad/include
+  third-party/glm
   third-party/imgui
 )
 target_link_libraries(${EXE_NAME} PRIVATE glfw)
