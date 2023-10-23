@@ -1,7 +1,6 @@
-#include "imgui.h"
 #include "routine.hpp"
-#include <GL/gl.h>
 #include <map>
+#include <tuple>
 
 #include <glm/common.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
@@ -14,6 +13,10 @@
 #include <glm/vec3.hpp>
 
 #include <tiny_gltf.h>
+
+constexpr float PI = glm::pi<float>();
+constexpr float TWO_PI = 2.0f * PI;
+constexpr float HALF_PI = 0.5f * PI;
 
 void loadModel(tinygltf::Model &model, const std::string &path) {
     std::string err;
@@ -61,8 +64,6 @@ void bindBufferViews(std::map<int, GLuint> &vbos,
         glBufferData(bufferView.target, bufferView.byteLength,
                      &buffer.data[bufferView.byteOffset], GL_STATIC_DRAW);
     }
-
-    // TODO: textures
 }
 
 void bindMesh(std::map<int, GLuint> &vbos, const tinygltf::Model &model,
@@ -224,7 +225,7 @@ void drawModel(GLuint vao, const std::map<int, GLuint> &ebos,
 
 ShaderProgram program;
 
-GLuint uniformViewport = 0;
+GLuint uniformSpecularPow = 0;
 GLuint uniformModel = 0;
 GLuint uniformView = 0;
 GLuint uniformProj = 0;
@@ -242,7 +243,7 @@ void loadShaders() {
     Shader shaderFrag(GL_FRAGMENT_SHADER, "main.frag");
     program = ShaderProgram(shaderVert.get(), shaderFrag.get());
 
-    uniformViewport = glGetUniformLocation(program.get(), "viewport");
+    uniformSpecularPow = glGetUniformLocation(program.get(), "specularPow");
     uniformModel = glGetUniformLocation(program.get(), "matModel");
     uniformView = glGetUniformLocation(program.get(), "matView");
     uniformProj = glGetUniformLocation(program.get(), "matProj");
@@ -272,21 +273,25 @@ int main() {
     glm::vec3 camPos = {0.0f, 0.0f, 5.0f};
     float camAngleX = 0.0f;
     float camAngleY = 0.0f;
+    float specularPow = 16.0f;
     float morphProgress = 0.0f;
     float fov = 45.0f;
     float camSpeed = 1.0f;
     float gamma = 1.0f;
 
-    glm::vec3 dirLightDir = {};
-    glm::vec3 dirLightColor = {};
-    float dirLightIntensity = 0.0f;
+    glm::vec3 dirLightDir = {1.0f, -1.0f, -1.0f};
+    glm::vec3 dirLightColor = {1.0f, 1.0f, 1.0f};
+    float dirLightIntensity = 2.5f;
 
-    glm::vec3 spotLightPos = {};
-    glm::vec3 spotLightDir = {};
-    glm::vec3 spotLightColor = {};
-    float spotLightPhi = 0.0f;
-    float spotLightTheta = 0.0f;
-    float spotLightIntensity = 0.0f;
+    glm::vec3 spotLightPos = {2.0f, 2.0f, 2.0f};
+    glm::vec3 spotLightDir = {-1.0f, -1.0f, -1.0f};
+    glm::vec3 spotLightColor = {0.0f, 1.0f, 1.0f};
+    float spotLightPhi = 60.0f;
+    float spotLightTheta = 45.0f;
+    float spotLightIntensity = 5.0f;
+
+    float rotationSpeed = 0.0f;
+    float cycle = 0.0f;
 
     while (!glfwWindowShouldClose(window)) {
         RaiiFrame _frame;
@@ -298,6 +303,7 @@ int main() {
         ImGui::SliderFloat("Camera speed", &camSpeed, 0.0f, 5.0f);
         ImGui::SliderFloat("FOV", &fov, 15.0f, 90.0f);
         ImGui::SliderFloat("Gamma", &gamma, 0, 10.0f);
+        ImGui::SliderFloat("Specular power", &specularPow, 0.0f, 256.0f);
         ImGui::SliderFloat("Morph progress", &morphProgress, 0.0f, 1.0f);
 
         if (ImGui::CollapsingHeader("Directional light")) {
@@ -323,6 +329,8 @@ int main() {
             ImGui::DragFloat("SL Intensity", &spotLightIntensity);
         }
 
+        ImGui::SliderFloat("Model rotation speed", &rotationSpeed, 0.0f, 1.0f);
+
         if (ImGui::Button("Reload shaders")) {
             try {
                 loadShaders();
@@ -345,12 +353,10 @@ int main() {
             mouseDelta = ImGui::GetMouseDragDelta(0, 0.0f);
             ImGui::ResetMouseDragDelta();
         }
-        camAngleX -= viewportInfo.z * mouseDelta.y / height;
+        camAngleX += viewportInfo.z * mouseDelta.y / height;
         camAngleY -= viewportInfo.z * mouseDelta.x / height;
-        camAngleX = glm::clamp(camAngleX, -0.5f * glm::pi<float>(),
-                               0.5f * glm::pi<float>());
-        camAngleY = 2.0 * glm::pi<float>() *
-                    glm::fract(camAngleY / (2.0 * glm::pi<float>()));
+        camAngleX = glm::clamp(camAngleX, -HALF_PI, HALF_PI);
+        camAngleY = TWO_PI * glm::fract(camAngleY / TWO_PI);
 
         // Calculate camera movement
         glm::vec3 camRight = {glm::cos(camAngleY), 0.0f, glm::sin(camAngleY)};
@@ -382,15 +388,12 @@ int main() {
         glClearDepth(0.0);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        double time = glfwGetTime();
-        double angle = 0.1 * time;
-        double cycle = 0.0; // glm::fract(0.5 * time);
-        double rotAngle =
-            2.0 * glm::pi<double>() * glm::smoothstep(0.0, 1.0, cycle);
-        glm::mat4 matModel = glm::rotate(
-            glm::mat4(1.0f), static_cast<float>(rotAngle), {1.0f, 0.0f, 0.0f});
+        cycle += rotationSpeed * deltaTime;
+        cycle = glm::fract(cycle);
+        float rotAngle = TWO_PI * glm::smoothstep(0.0f, 1.0f, cycle);
+        glm::mat4 matModel =
+            glm::rotate(glm::mat4(1.0f), rotAngle, {1.0f, 0.0f, 0.0f});
 
-        angle = 0.0f;
         glm::mat4 matView(1.0f);
         matView[0] = glm::vec4(camRight, 0.0f);
         matView[1] = glm::vec4(camUp, 0.0f);
@@ -403,9 +406,6 @@ int main() {
         glm::mat4 matNormal = glm::transpose(glm::inverse(matView * matModel));
 
         RaiiUseProgram _bind1(program.get());
-        glUniform4f(uniformViewport, viewportInfo.x, viewportInfo.y,
-                    viewportInfo.z, viewportInfo.w);
-
         glUniformMatrix4fv(uniformModel, 1, GL_FALSE,
                            reinterpret_cast<GLfloat *>(&matModel));
         glUniformMatrix4fv(uniformView, 1, GL_FALSE,
@@ -414,16 +414,29 @@ int main() {
                            reinterpret_cast<GLfloat *>(&matProj));
         glUniformMatrix4fv(uniformNormal, 1, GL_FALSE,
                            reinterpret_cast<GLfloat *>(&matNormal));
+        glUniform1f(uniformSpecularPow, specularPow);
         glUniform1f(uniformMorphProgress, morphProgress);
 
+        // We will calculate everything in view space,
+        // where coordinates are still orthonormal
+        matNormal = glm::transpose(glm::inverse(matView));
         glm::vec4 dlDir = matNormal * glm::vec4(glm::normalize(dirLightDir), 0);
         glm::vec3 dlColor = dirLightIntensity * dirLightColor;
 
-        // glm::vec2 slAngle = glm::cos(glm::vec2{spotLightPhi,
-        // spotLightTheta});
+        glm::vec4 slPos = matView * glm::vec4(spotLightPos, 1);
+        glm::vec4 slDir =
+            matNormal * glm::vec4(glm::normalize(spotLightDir), 0);
+        glm::vec2 slAngle =
+            glm::cos(glm::radians(glm::vec2{spotLightPhi, spotLightTheta}));
+        glm::vec3 slColor = spotLightIntensity * spotLightColor;
 
         glUniform3f(uniformDirLightDir, dlDir.x, dlDir.y, dlDir.z);
         glUniform3f(uniformDirLightColor, dlColor.x, dlColor.y, dlColor.z);
+
+        glUniform3f(uniformSpotLightPos, slPos.x, slPos.y, slPos.z);
+        glUniform3f(uniformSpotLightDir, slDir.x, slDir.y, slDir.z);
+        glUniform3f(uniformSpotLightColor, slColor.x, slColor.y, slColor.z);
+        glUniform2f(uniformSpotLightAngleCos, slAngle.x, slAngle.y);
 
         glEnable(GL_MULTISAMPLE);
         glEnable(GL_DEPTH_TEST);
