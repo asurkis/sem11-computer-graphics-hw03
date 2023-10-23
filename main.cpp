@@ -1,3 +1,4 @@
+#include "imgui.h"
 #include "routine.hpp"
 #include <map>
 
@@ -6,6 +7,7 @@
 #include <glm/ext/matrix_common.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/ext/scalar_constants.hpp>
+#include <glm/geometric.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
@@ -164,6 +166,7 @@ int main() {
     GLuint uniformModel = glGetUniformLocation(program.get(), "matModel");
     GLuint uniformView = glGetUniformLocation(program.get(), "matView");
     GLuint uniformProj = glGetUniformLocation(program.get(), "matProj");
+    GLuint uniformNormal = glGetUniformLocation(program.get(), "matNormal");
     GLuint uniformMorphProgress =
         glGetUniformLocation(program.get(), "morphProgress");
 
@@ -171,12 +174,22 @@ int main() {
     loadModel(model, "model.gltf");
     auto [vao, idxBuffers] = bindModel(model);
 
+    glm::vec3 camPos = {0.0f, 0.0f, 5.0f};
+    float camAngleX = 0.0f;
+    float camAngleY = 0.0f;
     float morphProgress = 0.0f;
+    float fov = 45.0f;
+    float camSpeed = 1.0f;
 
     while (!glfwWindowShouldClose(window)) {
         RaiiFrame _frame;
 
-        ImGui::Begin("Settings");
+        float deltaTime = ImGui::GetIO().DeltaTime;
+
+        ImGui::Begin("Info");
+        ImGui::Text("FPS: %f", ImGui::GetIO().Framerate);
+        ImGui::SliderFloat("Camera speed", &camSpeed, 0.0f, 5.0f);
+        ImGui::SliderFloat("FOV", &fov, 15.0f, 180.0f);
         ImGui::SliderFloat("Morph progress", &morphProgress, 0.0f, 1.0f);
         ImGui::End();
 
@@ -184,23 +197,69 @@ int main() {
         glfwGetWindowSize(window, &width, &height);
         glViewport(0, 0, width, height);
 
+        // Calculate camera direction
+        ImVec2 mouseDelta = ImGui::GetMouseDragDelta(0, 0.0f);
+        ImGui::ResetMouseDragDelta();
+        camAngleX -= mouseDelta.y / height;
+        camAngleY -= mouseDelta.x / height;
+        camAngleX = glm::clamp(camAngleX, -glm::pi<float>(), glm::pi<float>());
+        camAngleY = 2.0 * glm::pi<float>() *
+                    glm::fract(camAngleY / (2.0 * glm::pi<float>()));
+
+        // Calculate camera movement
+        glm::vec3 camRight = {glm::cos(camAngleY), 0.0f, glm::sin(camAngleY)};
+        glm::vec3 camForward =
+            glm::vec3{camRight.z, 0.0f, -camRight.x} * glm::cos(camAngleX) +
+            glm::vec3{0.0f, -glm::sin(camAngleX), 0.0f};
+        glm::vec3 camUp = glm::cross(camForward, camRight);
+
+        if (ImGui::IsKeyDown(ImGuiKey_W)) {
+            camPos += deltaTime * camSpeed * camForward;
+        }
+        if (ImGui::IsKeyDown(ImGuiKey_S)) {
+            camPos -= deltaTime * camSpeed * camForward;
+        }
+        if (ImGui::IsKeyDown(ImGuiKey_D)) {
+            camPos += deltaTime * camSpeed * camRight;
+        }
+        if (ImGui::IsKeyDown(ImGuiKey_A)) {
+            camPos -= deltaTime * camSpeed * camRight;
+        }
+        if (ImGui::IsKeyDown(ImGuiKey_E)) {
+            camPos.y += deltaTime * camSpeed;
+        }
+        if (ImGui::IsKeyDown(ImGuiKey_Q)) {
+            camPos.y -= deltaTime * camSpeed;
+        }
+
         glClearColor(1.0f, 0.75f, 0.5f, 1.0f);
         glClearDepth(0.0);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         double time = glfwGetTime();
         double angle = 0.1 * time;
-        double cycle = glm::fract(0.5 * time);
+        double cycle = 0.0; // glm::fract(0.5 * time);
         double rotAngle =
             2.0 * glm::pi<double>() * glm::smoothstep(0.0, 1.0, cycle);
         glm::mat4 matModel = glm::rotate(
             glm::mat4(1.0f), static_cast<float>(rotAngle), {1.0f, 0.0f, 0.0f});
 
-        glm::mat4 matView = glm::lookAt(
-            glm::vec3{5.0 * glm::cos(angle), 5.0 * glm::sin(angle), 2.0f},
-            glm::vec3{}, glm::vec3{0.0f, 0.0f, 1.0f});
+        angle = 0.0f;
+        glm::mat4 matView(1.0f);
+        matView[0] = glm::vec4(camRight, 0.0f);
+        matView[1] = glm::vec4(camUp, 0.0f);
+        matView[2] = glm::vec4(-camForward, 0.0f);
+        matView = glm::transpose(matView);
+        // matView = glm::rotate(matView, camAngleX, {1.0f, 0.0f, 0.0f});
+        // matView = glm::rotate(matView, camAngleY, {0.0f, 1.0f, 0.0f});
+        matView = glm::translate(matView, -camPos);
+        // glm::mat4 matView = glm::lookAt(
+        //     glm::vec3{5.0 * glm::cos(angle), 5.0 * glm::sin(angle), 2.0f},
+        //     glm::vec3{}, glm::vec3{0.0f, 0.0f, 1.0f});
         glm::mat4 matProj = glm::perspective(
-            glm::radians(45.0f), 1.0f * width / height, 100.0f, 0.001f);
+            glm::radians(fov), 1.0f * width / height, 100.0f, 0.001f);
+
+        // glm::mat4 matNormal = glm::transpose(glm::inverse(matView * matModel));
 
         RaiiUseProgram _bind1(program.get());
         glUniformMatrix4fv(uniformModel, 1, GL_FALSE,
@@ -209,6 +268,8 @@ int main() {
                            reinterpret_cast<GLfloat *>(&matView));
         glUniformMatrix4fv(uniformProj, 1, GL_FALSE,
                            reinterpret_cast<GLfloat *>(&matProj));
+        // glUniformMatrix4fv(uniformProj, 1, GL_FALSE,
+        //                    reinterpret_cast<GLfloat *>(&matNormal));
         glUniform1f(uniformMorphProgress, morphProgress);
 
         glEnable(GL_MULTISAMPLE);
