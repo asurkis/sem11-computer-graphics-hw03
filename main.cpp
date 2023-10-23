@@ -302,7 +302,6 @@ int main() {
         ImGui::Text("FPS: %f", ImGui::GetIO().Framerate);
         ImGui::SliderFloat("Camera speed", &camSpeed, 0.0f, 5.0f);
         ImGui::SliderFloat("FOV", &fov, 15.0f, 90.0f);
-        ImGui::SliderFloat("Gamma", &gamma, 0, 10.0f);
         ImGui::SliderFloat("Specular power", &specularPow, 0.0f, 256.0f);
         ImGui::SliderFloat("Morph progress", &morphProgress, 0.0f, 1.0f);
 
@@ -344,8 +343,7 @@ int main() {
         glfwGetWindowSize(window, &width, &height);
         glViewport(0, 0, width, height);
 
-        glm::vec4 viewportInfo = {width, height, glm::tan(glm::radians(fov)),
-                                  gamma};
+        float fovTan = glm::tan(glm::radians(fov));
 
         // Calculate camera direction
         ImVec2 mouseDelta;
@@ -353,8 +351,8 @@ int main() {
             mouseDelta = ImGui::GetMouseDragDelta(0, 0.0f);
             ImGui::ResetMouseDragDelta();
         }
-        camAngleX += viewportInfo.z * mouseDelta.y / height;
-        camAngleY -= viewportInfo.z * mouseDelta.x / height;
+        camAngleX += fovTan * mouseDelta.y / height;
+        camAngleY -= fovTan * mouseDelta.x / height;
         camAngleX = glm::clamp(camAngleX, -HALF_PI, HALF_PI);
         camAngleY = TWO_PI * glm::fract(camAngleY / TWO_PI);
 

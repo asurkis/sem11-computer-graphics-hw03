@@ -23,7 +23,6 @@ vec4 debugNormal(vec3 norm) {
 }
 
 void main() {
-    // vec3 viewDir = normalize(vec3(xy, -1));
     vec3 viewDir = normalize(viewPosition);
 
     float dirDot = dot(-dirLightDir, normal);
