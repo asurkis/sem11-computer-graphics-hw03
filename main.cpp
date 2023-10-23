@@ -164,13 +164,21 @@ int main() {
     GLuint uniformModel = glGetUniformLocation(program.get(), "matModel");
     GLuint uniformView = glGetUniformLocation(program.get(), "matView");
     GLuint uniformProj = glGetUniformLocation(program.get(), "matProj");
+    GLuint uniformMorphProgress =
+        glGetUniformLocation(program.get(), "morphProgress");
 
     tinygltf::Model model;
     loadModel(model, "model.gltf");
     auto [vao, idxBuffers] = bindModel(model);
 
+    float morphProgress = 0.0f;
+
     while (!glfwWindowShouldClose(window)) {
         RaiiFrame _frame;
+
+        ImGui::Begin("Settings");
+        ImGui::SliderFloat("Morph progress", &morphProgress, 0.0f, 1.0f);
+        ImGui::End();
 
         int width = 0, height = 0;
         glfwGetWindowSize(window, &width, &height);
@@ -201,6 +209,7 @@ int main() {
                            reinterpret_cast<GLfloat *>(&matView));
         glUniformMatrix4fv(uniformProj, 1, GL_FALSE,
                            reinterpret_cast<GLfloat *>(&matProj));
+        glUniform1f(uniformMorphProgress, morphProgress);
 
         glEnable(GL_MULTISAMPLE);
         glEnable(GL_DEPTH_TEST);
