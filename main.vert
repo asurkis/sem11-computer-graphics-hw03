@@ -9,19 +9,24 @@ uniform mat4 matNormal;
 
 uniform float morphProgress;
 
-in vec3 inPosition;
-in vec3 inNormal;
-in vec2 inTexCoord0;
+layout (location = 0) in vec3 inPosition;
+layout (location = 1) in vec3 inNormal;
+layout (location = 2) in vec2 inTexCoord0;
 
 out vec3 position;
 out vec3 normal;
 out vec2 texCoord0;
 
 void main() {
-    vec3 next = normalize(inPosition);
-    vec3 pos = mix(inPosition, next, morphProgress);
+    vec3 nextPos = normalize(inPosition);
+    vec3 nextNormal = nextPos; // morphing to a sphere
+
+    vec3 pos = mix(inPosition, nextPos, morphProgress);
     gl_Position = matProj * matView * matModel * vec4(pos, 1);
     position = inPosition;
-    // normal = (matNormal * vec4(inNormal, 0)).xyz;
+
+    vec3 immNormal = mix(inNormal, nextNormal, morphProgress);
+    normal = (matNormal * vec4(immNormal, 0)).xyz;
+
     texCoord0 = inTexCoord0;
 }
