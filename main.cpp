@@ -1,4 +1,3 @@
-#include "glm/detail/qualifier.hpp"
 #include "routine.hpp"
 #include <algorithm>
 #include <map>
@@ -283,16 +282,16 @@ struct Model {
         auto &node = model.nodes[nodeId];
         if (node.matrix.size() == 16) {
             glm::mat4 matNode = glm::make_mat4(node.matrix.data());
-            matModel = matNode * matModel;
+            matModel *= matNode;
         } else {
-            if (node.rotation.size() == 4) {
-                glm::quat quat = glm::make_quat(node.rotation.data());
-                matModel = glm::toMat4(quat) * matModel;
-            }
             if (node.translation.size() == 3) {
                 glm::vec3 vec = glm::make_vec3(node.translation.data());
                 glm::mat4 matNode = glm::translate(glm::mat4(1.0f), vec);
-                matModel = matNode * matModel;
+                matModel *= matNode;
+            }
+            if (node.rotation.size() == 4) {
+                glm::quat quat = glm::make_quat(node.rotation.data());
+                matModel *= glm::toMat4(quat);
             }
         }
         if (0 <= node.mesh && node.mesh < model.meshes.size())
@@ -337,13 +336,18 @@ struct Model {
     }
 };
 
+void framebufferSizeCallback(GLFWwindow *, int width, int height) {
+    glViewport(0, 0, width, height);
+}
+
 int main() {
+    glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
     loadShaders();
 
     Model model;
     model.loadFrom("chess/chess.gltf");
 
-    glm::vec3 camPos = {0.0f, 0.0f, 5.0f};
+    glm::vec3 camPos = {0.0f, 0.0f, 1.0f};
     float camAngleX = 0.0f;
     float camAngleY = 0.0f;
     float specularPow = 16.0f;
@@ -413,8 +417,7 @@ int main() {
         ImGui::End();
 
         int width = 0, height = 0;
-        glfwGetWindowSize(window, &width, &height);
-        glViewport(0, 0, width, height);
+        glfwGetFramebufferSize(window, &width, &height);
 
         float fovTan = glm::tan(glm::radians(fov));
 
