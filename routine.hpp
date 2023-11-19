@@ -225,7 +225,7 @@ struct ShaderProgram {
 
         GLint status = 0;
         glGetProgramiv(get(), GL_LINK_STATUS, &status);
-        if (!status) { throw std::runtime_error("Failed to link program"); }
+        if (!status) throw std::runtime_error("Failed to link program");
     }
 
     ~ShaderProgram() { clear(); }

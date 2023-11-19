@@ -6,7 +6,6 @@ uniform vec4 colorFactor;
 layout (location = 0) out vec4 gBaseColor;
 layout (location = 1) out vec4 gNormal;
 
-in vec3 viewPosition;
 in vec3 normal;
 in vec2 texCoord0;
 

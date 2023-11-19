@@ -402,8 +402,8 @@ int main() {
     glGenTextures(1, &noiseTexture);
     {
         std::default_random_engine rng;
-        std::uniform_int_distribution<GLubyte> distrib;
-        std::vector<GLubyte> noise;
+        std::uniform_int_distribution<GLushort> distrib;
+        std::vector<GLushort> noise;
         noise.reserve(4 * NOISE_TEXTURE_SIZE * NOISE_TEXTURE_SIZE);
         for (size_t i = 0; i < 4 * NOISE_TEXTURE_SIZE * NOISE_TEXTURE_SIZE;
              ++i) {
@@ -416,7 +416,7 @@ int main() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, NOISE_TEXTURE_SIZE,
-                     NOISE_TEXTURE_SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     NOISE_TEXTURE_SIZE, 0, GL_RGBA, GL_UNSIGNED_SHORT,
                      noise.data());
     }
 
