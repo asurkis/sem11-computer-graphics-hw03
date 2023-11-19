@@ -29,6 +29,8 @@ constexpr float HALF_PI = 0.5f * PI;
 
 ShaderProgram program;
 
+GLuint uniformIsTextured = 0;
+GLuint uniformColorFactor = 0;
 GLuint uniformSpecularPow = 0;
 GLuint uniformModel = 0;
 GLuint uniformView = 0;
@@ -47,6 +49,8 @@ void loadShaders() {
     Shader shaderFrag(GL_FRAGMENT_SHADER, "main.frag");
     program = ShaderProgram(shaderVert.get(), shaderFrag.get());
 
+    uniformIsTextured = glGetUniformLocation(program.get(), "isTextured");
+    uniformColorFactor = glGetUniformLocation(program.get(), "colorFactor");
     uniformSpecularPow = glGetUniformLocation(program.get(), "specularPow");
     uniformModel = glGetUniformLocation(program.get(), "matModel");
     uniformView = glGetUniformLocation(program.get(), "matView");
@@ -96,9 +100,16 @@ struct Model {
         }
     }
 
-    void draw(const glm::mat4 &matView, const glm::mat4 &matModel) {
+    void drawPassFlat(const glm::mat4 &matView, const glm::mat4 &matModel) {
         auto &scene = model.scenes[model.defaultScene];
-        for (int nodeId : scene.nodes) drawNode(matView, matModel, nodeId);
+        for (int nodeId : scene.nodes)
+            drawNode(matView, matModel, nodeId, false);
+    }
+
+    void drawPassTextured(const glm::mat4 &matView, const glm::mat4 &matModel) {
+        auto &scene = model.scenes[model.defaultScene];
+        for (int nodeId : scene.nodes)
+            drawNode(matView, matModel, nodeId, true);
     }
 
   private:
@@ -267,7 +278,8 @@ struct Model {
         }
     }
 
-    void drawNode(const glm::mat4 &matView, glm::mat4 matModel, int nodeId) {
+    void drawNode(const glm::mat4 &matView, glm::mat4 matModel, int nodeId,
+                  bool textured) {
         auto &node = model.nodes[nodeId];
         if (node.matrix.size() == 16) {
             glm::mat4 matNode = glm::make_mat4(node.matrix.data());
@@ -284,12 +296,13 @@ struct Model {
             }
         }
         if (0 <= node.mesh && node.mesh < model.meshes.size())
-            drawMesh(matView, matModel, node.mesh);
-        for (int childId : node.children) drawNode(matView, matModel, childId);
+            drawMesh(matView, matModel, node.mesh, textured);
+        for (int childId : node.children)
+            drawNode(matView, matModel, childId, textured);
     }
 
     void drawMesh(const glm::mat4 &matView, const glm::mat4 &matModel,
-                  int meshId) {
+                  int meshId, bool expectTexture) {
         auto &mesh = model.meshes[meshId];
         glm::mat4 matNormal = glm::transpose(glm::inverse(matView * matModel));
         RaiiBindVao _bind1(vaos[meshId]);
@@ -298,19 +311,28 @@ struct Model {
         glUniformMatrix4fv(uniformModel, 1, GL_FALSE,
                            reinterpret_cast<const GLfloat *>(&matModel));
         for (auto &prim : mesh.primitives) {
-            auto &material = model.materials[prim.material];
-            auto &pbr = material.pbrMetallicRoughness;
-            auto &texInfo = pbr.baseColorTexture;
-            GLuint texture = 0;
-            if (0 <= texInfo.index && texInfo.index < textures.size())
-                texture = textures[texInfo.index];
-
             auto &accessor = model.accessors[prim.indices];
             RaiiBindBuffer _bind2(GL_ELEMENT_ARRAY_BUFFER,
                                   buffers[accessor.bufferView]);
+
+            auto &material = model.materials[prim.material];
+            auto &pbr = material.pbrMetallicRoughness;
+            auto &texInfo = pbr.baseColorTexture;
+            glUniform4f(uniformColorFactor, pbr.baseColorFactor[0],
+                        pbr.baseColorFactor[1], pbr.baseColorFactor[2],
+                        pbr.baseColorFactor[3]);
+
+            bool hasTexture
+                = 0 <= texInfo.index && texInfo.index < textures.size();
+
+            GLuint texture = hasTexture ? textures[texInfo.index] : 0;
             RaiiBindTexture _bind3(GL_TEXTURE_2D, texture);
-            glDrawElements(prim.mode, accessor.count, accessor.componentType,
-                           static_cast<char *>(nullptr) + accessor.byteOffset);
+
+            if (hasTexture == expectTexture) {
+                glDrawElements(
+                    prim.mode, accessor.count, accessor.componentType,
+                    static_cast<char *>(nullptr) + accessor.byteOffset);
+            }
         }
     }
 };
@@ -480,7 +502,10 @@ int main() {
         // glEnable(GL_CULL_FACE);
 
         glDepthFunc(GL_GREATER);
-        model.draw(matView, matModel);
+        glUniform1i(uniformIsTextured, 1);
+        model.drawPassTextured(matView, matModel);
+        glUniform1i(uniformIsTextured, 0);
+        model.drawPassFlat(matView, matModel);
 
         // glDisable(GL_CULL_FACE);
         glDisable(GL_DEPTH_TEST);

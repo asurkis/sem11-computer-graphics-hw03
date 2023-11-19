@@ -1,5 +1,8 @@
 #version 330 core
 
+uniform bool isTextured;
+uniform vec4 colorFactor;
+
 uniform float specularPow;
 
 uniform vec3 dirLightDir;
@@ -52,7 +55,8 @@ void main() {
     float spotDiffuse = max(0, spotDot);
     float spotSpecular = pow(max(0, spotReflectDot), specularPow);
 
-    vec3 baseColor = texture(tex, texCoord0).xyz;
+    vec3 baseColor = isTextured ? texture(tex, texCoord0).xyz : vec3(1);
+    baseColor *= colorFactor.xyz;
     vec3 dirColor = (dirDiffuse + dirSpecular) * baseColor * dirLightColor;
     vec3 spotColor = (spotDiffuse + spotSpecular) * baseColor * spotLightColor;
     color = vec4(dirColor + spotColor, 1);
