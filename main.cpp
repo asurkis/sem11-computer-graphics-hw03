@@ -38,10 +38,15 @@ ShaderProgram programScreen;
 
 GLuint uniformIsTextured = 0;
 GLuint uniformColorFactor = 0;
-GLuint uniformModel = 0;
-GLuint uniformView = 0;
-GLuint uniformProj = 0;
-GLuint uniformNormal = 0;
+GLuint uniformMatModel = 0;
+GLuint uniformMatView = 0;
+GLuint uniformMatProj = 0;
+GLuint uniformMatNormal = 0;
+
+GLuint uniformGBaseColor = 0;
+GLuint uniformGNormal = 0;
+GLuint uniformGDepth = 0;
+GLuint uniformZNearFar = 0;
 
 GLuint uniformSpecularPow = 0;
 GLuint uniformMorphProgress = 0;
@@ -57,32 +62,39 @@ void loadShaders() {
     Shader shaderGBufFrag(GL_FRAGMENT_SHADER, "gbuf.frag");
     ShaderProgram programGBuf(shaderGBufVert.get(), shaderGBufFrag.get());
 
-    uniformIsTextured = glGetUniformLocation(programGBuf.get(), "isTextured");
-    uniformColorFactor = glGetUniformLocation(programGBuf.get(), "colorFactor");
-    uniformSpecularPow = glGetUniformLocation(programGBuf.get(), "specularPow");
-    uniformModel = glGetUniformLocation(programGBuf.get(), "matModel");
-    uniformView = glGetUniformLocation(programGBuf.get(), "matView");
-    uniformProj = glGetUniformLocation(programGBuf.get(), "matProj");
-    uniformNormal = glGetUniformLocation(programGBuf.get(), "matNormal");
-    uniformMorphProgress
-        = glGetUniformLocation(programGBuf.get(), "morphProgress");
-
-    uniformDirLightDir = glGetUniformLocation(programGBuf.get(), "dirLightDir");
-    uniformDirLightColor
-        = glGetUniformLocation(programGBuf.get(), "dirLightColor");
-
-    uniformSpotLightPos
-        = glGetUniformLocation(programGBuf.get(), "spotLightPos");
-    uniformSpotLightDir
-        = glGetUniformLocation(programGBuf.get(), "spotLightDir");
-    uniformSpotLightColor
-        = glGetUniformLocation(programGBuf.get(), "spotLightColor");
-    uniformSpotLightAngleCos
-        = glGetUniformLocation(programGBuf.get(), "spotLightAngleCos");
-
     Shader shaderScreenVert(GL_VERTEX_SHADER, "screen.vert");
     Shader shaderScreenFrag(GL_FRAGMENT_SHADER, "screen.frag");
     ShaderProgram programScreen(shaderScreenVert.get(), shaderScreenFrag.get());
+
+    uniformIsTextured = glGetUniformLocation(programGBuf.get(), "isTextured");
+    uniformColorFactor = glGetUniformLocation(programGBuf.get(), "colorFactor");
+
+    uniformMatModel = glGetUniformLocation(programGBuf.get(), "matModel");
+    uniformMatView = glGetUniformLocation(programGBuf.get(), "matView");
+    uniformMatProj = glGetUniformLocation(programGBuf.get(), "matProj");
+    uniformMatNormal = glGetUniformLocation(programGBuf.get(), "matNormal");
+
+    uniformGBaseColor = glGetUniformLocation(programScreen.get(), "gBaseColor");
+    uniformGNormal = glGetUniformLocation(programScreen.get(), "gNormal");
+    uniformGDepth = glGetUniformLocation(programScreen.get(), "gDepth");
+    uniformZNearFar = glGetUniformLocation(programScreen.get(), "viewport");
+
+    uniformSpecularPow
+        = glGetUniformLocation(programScreen.get(), "specularPow");
+    uniformMorphProgress
+        = glGetUniformLocation(programScreen.get(), "morphProgress");
+    uniformDirLightDir
+        = glGetUniformLocation(programScreen.get(), "dirLightDir");
+    uniformDirLightColor
+        = glGetUniformLocation(programScreen.get(), "dirLightColor");
+    uniformSpotLightPos
+        = glGetUniformLocation(programScreen.get(), "spotLightPos");
+    uniformSpotLightDir
+        = glGetUniformLocation(programScreen.get(), "spotLightDir");
+    uniformSpotLightColor
+        = glGetUniformLocation(programScreen.get(), "spotLightColor");
+    uniformSpotLightAngleCos
+        = glGetUniformLocation(programScreen.get(), "spotLightAngleCos");
 
     ::programGBuf = std::move(programGBuf);
     ::programScreen = std::move(programScreen);
@@ -326,9 +338,9 @@ struct Model {
         auto &mesh = model.meshes[meshId];
         glm::mat4 matNormal = glm::transpose(glm::inverse(matView * matModel));
         RaiiBindVao _bind1(vaos[meshId]);
-        glUniformMatrix4fv(uniformNormal, 1, GL_FALSE,
+        glUniformMatrix4fv(uniformMatNormal, 1, GL_FALSE,
                            reinterpret_cast<GLfloat *>(&matNormal));
-        glUniformMatrix4fv(uniformModel, 1, GL_FALSE,
+        glUniformMatrix4fv(uniformMatModel, 1, GL_FALSE,
                            reinterpret_cast<const GLfloat *>(&matModel));
         for (auto &prim : mesh.primitives) {
             auto &accessor = model.accessors[prim.indices];
@@ -554,8 +566,9 @@ int main() {
         matView[2] = glm::vec4(-camForward, 0.0f);
         matView = glm::transpose(matView);
         matView = glm::translate(matView, -camPos);
+        glm::vec2 zNearFar = {0.001f, 100.0f};
         glm::mat4 matProj = glm::perspective(
-            glm::radians(fov), 1.0f * width / height, 100.0f, 0.001f);
+            glm::radians(fov), 1.0f * width / height, zNearFar.y, zNearFar.x);
 
         // We will calculate everything in view space,
         // where coordinates are still orthonormal
@@ -572,28 +585,23 @@ int main() {
             RaiiBindFramebuffer _bind1(GL_FRAMEBUFFER, fbo);
             RaiiUseProgram _bind2(programGBuf.get());
 
+            GLenum attachments[GBUF_SIZE];
+            for (GLsizei i = 0; i < GBUF_SIZE; ++i)
+                attachments[i] = GL_COLOR_ATTACHMENT0 + i;
+            glDrawBuffers(GBUF_SIZE, attachments);
+
             glEnable(GL_MULTISAMPLE);
             glEnable(GL_DEPTH_TEST);
             glEnable(GL_CULL_FACE);
 
-            glClearColor(1.0f, 0.75f, 0.5f, 1.0f);
+            glClearColor(1.0f, 0.75f, 0.5f, 0.0f);
             glClearDepth(0.0);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-            glUniformMatrix4fv(uniformView, 1, GL_FALSE,
+            glUniformMatrix4fv(uniformMatView, 1, GL_FALSE,
                                reinterpret_cast<GLfloat *>(&matView));
-            glUniformMatrix4fv(uniformProj, 1, GL_FALSE,
+            glUniformMatrix4fv(uniformMatProj, 1, GL_FALSE,
                                reinterpret_cast<GLfloat *>(&matProj));
-            glUniform1f(uniformSpecularPow, specularPow);
-            glUniform1f(uniformMorphProgress, morphProgress);
-
-            glUniform3f(uniformDirLightDir, dlDir.x, dlDir.y, dlDir.z);
-            glUniform3f(uniformDirLightColor, dlColor.x, dlColor.y, dlColor.z);
-
-            glUniform3f(uniformSpotLightPos, slPos.x, slPos.y, slPos.z);
-            glUniform3f(uniformSpotLightDir, slDir.x, slDir.y, slDir.z);
-            glUniform3f(uniformSpotLightColor, slColor.x, slColor.y, slColor.z);
-            glUniform2f(uniformSpotLightAngleCos, slAngle.x, slAngle.y);
 
             glDepthFunc(GL_GREATER);
             glUniform1i(uniformIsTextured, 1);
@@ -611,14 +619,31 @@ int main() {
             glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
+            glUniform1i(uniformGBaseColor, 0);
+            glUniform1i(uniformGNormal, 1);
+            glUniform1i(uniformGDepth, 2);
+            glUniform4f(uniformZNearFar, static_cast<GLfloat>(width),
+                        static_cast<GLfloat>(height), zNearFar.x, zNearFar.y);
+
+            glUniform1f(uniformSpecularPow, specularPow);
+            glUniform1f(uniformMorphProgress, morphProgress);
+            glUniform3f(uniformDirLightDir, dlDir.x, dlDir.y, dlDir.z);
+            glUniform3f(uniformDirLightColor, dlColor.x, dlColor.y, dlColor.z);
+            glUniform3f(uniformSpotLightPos, slPos.x, slPos.y, slPos.z);
+            glUniform3f(uniformSpotLightDir, slDir.x, slDir.y, slDir.z);
+            glUniform3f(uniformSpotLightColor, slColor.x, slColor.y, slColor.z);
+            glUniform2f(uniformSpotLightAngleCos, slAngle.x, slAngle.y);
+
             RaiiBindVao _bind2(fullScreenVao);
             for (GLsizei i = 0; i < GBUF_SIZE; ++i) {
                 glActiveTexture(GL_TEXTURE0 + i);
                 glBindTexture(GL_TEXTURE_2D, gbuf[i]);
             }
-            glActiveTexture(GL_TEXTURE1);
+            glActiveTexture(GL_TEXTURE0 + GBUF_SIZE);
+            glBindTexture(GL_TEXTURE_2D, depthBuf);
             glDrawArrays(GL_TRIANGLES, 0, 3);
-            for (GLsizei i = 0; i < GBUF_SIZE; ++i) {
+            glBindTexture(GL_TEXTURE_2D, 0);
+            for (GLsizei i = GBUF_SIZE; i-- > GBUF_SIZE;) {
                 glActiveTexture(GL_TEXTURE0 + i);
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
