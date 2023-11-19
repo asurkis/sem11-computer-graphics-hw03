@@ -1,3 +1,4 @@
+#include "glm/detail/qualifier.hpp"
 #include "routine.hpp"
 #include <algorithm>
 #include <map>
@@ -8,8 +9,12 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_common.hpp>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/ext/quaternion_common.hpp>
+#include <glm/ext/quaternion_float.hpp>
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/geometric.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
@@ -81,16 +86,19 @@ struct Model {
 
         for (int nodeId = 0; nodeId < model.nodes.size(); ++nodeId) {
             auto &node = model.nodes[nodeId];
-            if (nodeUsed[nodeId]) meshUsed[node.mesh] = true;
+            if (nodeUsed[nodeId]) {
+                if (0 > node.mesh || node.mesh >= model.meshes.size()) continue;
+                meshUsed[node.mesh] = true;
+            }
         }
         for (int meshId = 0; meshId < model.meshes.size(); ++meshId) {
             if (meshUsed[meshId]) bindMesh(meshId);
         }
     }
 
-    void draw(const glm::mat4 &matModel) {
+    void draw(const glm::mat4 &matView, const glm::mat4 &matModel) {
         auto &scene = model.scenes[model.defaultScene];
-        for (int nodeId : scene.nodes) drawNode(matModel, nodeId);
+        for (int nodeId : scene.nodes) drawNode(matView, matModel, nodeId);
     }
 
   private:
@@ -105,9 +113,9 @@ struct Model {
         tinygltf::TinyGLTF loader;
         bool ret = loader.LoadASCIIFromFile(&model, &err, &warn, path);
 
-        std::cout << warn << '\n' << err << '\n';
+        std::cout << "Warnings: " << warn << "\nErrors: " << err << '\n';
 
-        if (!ret) { throw std::runtime_error("Could not load model"); }
+        if (!ret) throw std::runtime_error("Could not load model");
     }
 
     void createBuffersAndTextures(const std::vector<bool> &nodeUsed) {
@@ -116,7 +124,10 @@ struct Model {
 
         for (int nodeId = 0; nodeId < model.nodes.size(); ++nodeId) {
             if (!nodeUsed[nodeId]) continue;
+
             auto &node = model.nodes[nodeId];
+            if (0 > node.mesh || node.mesh > model.meshes.size()) continue;
+
             auto &mesh = model.meshes[node.mesh];
             for (auto &prim : mesh.primitives) {
                 auto &idxAcc = model.accessors[prim.indices];
@@ -136,7 +147,8 @@ struct Model {
                 auto &material = model.materials[prim.material];
                 auto &pbr = material.pbrMetallicRoughness;
                 auto &texInfo = pbr.baseColorTexture;
-                texUsed[texInfo.index] = true;
+                if (0 <= texInfo.index && texInfo.index < texUsed.size())
+                    texUsed[texInfo.index] = true;
             }
         }
 
@@ -208,16 +220,6 @@ struct Model {
         visited[nodeId] = true;
 
         auto &node = model.nodes[nodeId];
-        auto &mesh = model.meshes[node.mesh];
-        for (auto &prim : mesh.primitives) {
-            auto &idxAcc = model.accessors[prim.indices];
-            visited[idxAcc.bufferView] = true;
-            for (auto &[name, accessorId] : prim.attributes) {
-                auto &accessor = model.accessors[accessorId];
-                visited[accessor.bufferView] = true;
-            }
-        }
-
         for (int nodeId : node.children) findUsedNodes(visited, nodeId);
     }
 
@@ -265,27 +267,48 @@ struct Model {
         }
     }
 
-    void drawNode(glm::mat4 matModel, int nodeId) {
+    void drawNode(const glm::mat4 &matView, glm::mat4 matModel, int nodeId) {
         auto &node = model.nodes[nodeId];
-        drawMesh(matModel, node.mesh);
-        for (int childId : node.children) drawNode(matModel, childId);
+        if (node.matrix.size() == 16) {
+            glm::mat4 matNode = glm::make_mat4(node.matrix.data());
+            matModel = matNode * matModel;
+        } else {
+            if (node.rotation.size() == 4) {
+                glm::quat quat = glm::make_quat(node.rotation.data());
+                matModel = glm::toMat4(quat) * matModel;
+            }
+            if (node.translation.size() == 3) {
+                glm::vec3 vec = glm::make_vec3(node.translation.data());
+                glm::mat4 matNode = glm::translate(glm::mat4(1.0f), vec);
+                matModel = matNode * matModel;
+            }
+        }
+        if (0 <= node.mesh && node.mesh < model.meshes.size())
+            drawMesh(matView, matModel, node.mesh);
+        for (int childId : node.children) drawNode(matView, matModel, childId);
     }
 
-    void drawMesh(const glm::mat4 &matModel, int meshId) {
+    void drawMesh(const glm::mat4 &matView, const glm::mat4 &matModel,
+                  int meshId) {
         auto &mesh = model.meshes[meshId];
+        glm::mat4 matNormal = glm::transpose(glm::inverse(matView * matModel));
         RaiiBindVao _bind1(vaos[meshId]);
+        glUniformMatrix4fv(uniformNormal, 1, GL_FALSE,
+                           reinterpret_cast<GLfloat *>(&matNormal));
         glUniformMatrix4fv(uniformModel, 1, GL_FALSE,
                            reinterpret_cast<const GLfloat *>(&matModel));
         for (auto &prim : mesh.primitives) {
             auto &material = model.materials[prim.material];
             auto &pbr = material.pbrMetallicRoughness;
             auto &texInfo = pbr.baseColorTexture;
-            int textureId = texInfo.index;
+            GLuint texture = 0;
+            if (0 <= texInfo.index && texInfo.index < textures.size())
+                texture = textures[texInfo.index];
 
             auto &accessor = model.accessors[prim.indices];
             RaiiBindBuffer _bind2(GL_ELEMENT_ARRAY_BUFFER,
                                   buffers[accessor.bufferView]);
-            RaiiBindTexture _bind3(GL_TEXTURE_2D, textures[textureId]);
+            RaiiBindTexture _bind3(GL_TEXTURE_2D, texture);
             glDrawElements(prim.mode, accessor.count, accessor.componentType,
                            static_cast<char *>(nullptr) + accessor.byteOffset);
         }
@@ -296,7 +319,7 @@ int main() {
     loadShaders();
 
     Model model;
-    model.loadFrom("model.gltf");
+    model.loadFrom("chess/chess.gltf");
 
     glm::vec3 camPos = {0.0f, 0.0f, 5.0f};
     float camAngleX = 0.0f;
@@ -425,27 +448,21 @@ int main() {
         glm::mat4 matProj = glm::perspective(
             glm::radians(fov), 1.0f * width / height, 100.0f, 0.001f);
 
-        glm::mat4 matNormal = glm::transpose(glm::inverse(matView * matModel));
-
         RaiiUseProgram _bind1(program.get());
         glUniformMatrix4fv(uniformView, 1, GL_FALSE,
                            reinterpret_cast<GLfloat *>(&matView));
         glUniformMatrix4fv(uniformProj, 1, GL_FALSE,
                            reinterpret_cast<GLfloat *>(&matProj));
-        glUniformMatrix4fv(uniformNormal, 1, GL_FALSE,
-                           reinterpret_cast<GLfloat *>(&matNormal));
         glUniform1f(uniformSpecularPow, specularPow);
         glUniform1f(uniformMorphProgress, morphProgress);
 
         // We will calculate everything in view space,
         // where coordinates are still orthonormal
-        matNormal = glm::transpose(glm::inverse(matView));
-        glm::vec4 dlDir = matNormal * glm::vec4(glm::normalize(dirLightDir), 0);
+        glm::vec4 dlDir = matView * glm::vec4(glm::normalize(dirLightDir), 0);
         glm::vec3 dlColor = dirLightIntensity * dirLightColor;
 
         glm::vec4 slPos = matView * glm::vec4(spotLightPos, 1);
-        glm::vec4 slDir
-            = matNormal * glm::vec4(glm::normalize(spotLightDir), 0);
+        glm::vec4 slDir = matView * glm::vec4(glm::normalize(spotLightDir), 0);
         glm::vec2 slAngle
             = glm::cos(glm::radians(glm::vec2{spotLightPhi, spotLightTheta}));
         glm::vec3 slColor = spotLightIntensity * spotLightColor;
@@ -463,7 +480,7 @@ int main() {
         // glEnable(GL_CULL_FACE);
 
         glDepthFunc(GL_GREATER);
-        model.draw(matModel);
+        model.draw(matView, matModel);
 
         // glDisable(GL_CULL_FACE);
         glDisable(GL_DEPTH_TEST);
