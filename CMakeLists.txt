@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.11)
-project(computer_graphics_hw02)
+project(computer_graphics_hw03)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(EXE_NAME hw02)
+set(EXE_NAME hw03)
 set(CXX_SOURCES
   main.cpp
   routine.hpp
