@@ -26,15 +26,16 @@ constexpr float PI = glm::pi<float>();
 constexpr float TWO_PI = 2.0f * PI;
 constexpr float HALF_PI = 0.5f * PI;
 
-ShaderProgram program;
+ShaderProgram programGBuf;
 
 GLuint uniformIsTextured = 0;
 GLuint uniformColorFactor = 0;
-GLuint uniformSpecularPow = 0;
 GLuint uniformModel = 0;
 GLuint uniformView = 0;
 GLuint uniformProj = 0;
 GLuint uniformNormal = 0;
+
+GLuint uniformSpecularPow = 0;
 GLuint uniformMorphProgress = 0;
 GLuint uniformDirLightDir = 0;
 GLuint uniformDirLightColor = 0;
@@ -44,28 +45,28 @@ GLuint uniformSpotLightColor = 0;
 GLuint uniformSpotLightAngleCos = 0;
 
 void loadShaders() {
-    Shader shaderVert(GL_VERTEX_SHADER, "main.vert");
-    Shader shaderFrag(GL_FRAGMENT_SHADER, "main.frag");
-    program = ShaderProgram(shaderVert.get(), shaderFrag.get());
+    Shader shaderGBufVert(GL_VERTEX_SHADER, "gbuf.vert");
+    Shader shaderGBufFrag(GL_FRAGMENT_SHADER, "gbuf.frag");
+    programGBuf = ShaderProgram(shaderGBufVert.get(), shaderGBufFrag.get());
 
-    uniformIsTextured = glGetUniformLocation(program.get(), "isTextured");
-    uniformColorFactor = glGetUniformLocation(program.get(), "colorFactor");
-    uniformSpecularPow = glGetUniformLocation(program.get(), "specularPow");
-    uniformModel = glGetUniformLocation(program.get(), "matModel");
-    uniformView = glGetUniformLocation(program.get(), "matView");
-    uniformProj = glGetUniformLocation(program.get(), "matProj");
-    uniformNormal = glGetUniformLocation(program.get(), "matNormal");
-    uniformMorphProgress = glGetUniformLocation(program.get(), "morphProgress");
+    uniformIsTextured = glGetUniformLocation(programGBuf.get(), "isTextured");
+    uniformColorFactor = glGetUniformLocation(programGBuf.get(), "colorFactor");
+    uniformSpecularPow = glGetUniformLocation(programGBuf.get(), "specularPow");
+    uniformModel = glGetUniformLocation(programGBuf.get(), "matModel");
+    uniformView = glGetUniformLocation(programGBuf.get(), "matView");
+    uniformProj = glGetUniformLocation(programGBuf.get(), "matProj");
+    uniformNormal = glGetUniformLocation(programGBuf.get(), "matNormal");
+    uniformMorphProgress = glGetUniformLocation(programGBuf.get(), "morphProgress");
 
-    uniformDirLightDir = glGetUniformLocation(program.get(), "dirLightDir");
-    uniformDirLightColor = glGetUniformLocation(program.get(), "dirLightColor");
+    uniformDirLightDir = glGetUniformLocation(programGBuf.get(), "dirLightDir");
+    uniformDirLightColor = glGetUniformLocation(programGBuf.get(), "dirLightColor");
 
-    uniformSpotLightPos = glGetUniformLocation(program.get(), "spotLightPos");
-    uniformSpotLightDir = glGetUniformLocation(program.get(), "spotLightDir");
+    uniformSpotLightPos = glGetUniformLocation(programGBuf.get(), "spotLightPos");
+    uniformSpotLightDir = glGetUniformLocation(programGBuf.get(), "spotLightDir");
     uniformSpotLightColor
-        = glGetUniformLocation(program.get(), "spotLightColor");
+        = glGetUniformLocation(programGBuf.get(), "spotLightColor");
     uniformSpotLightAngleCos
-        = glGetUniformLocation(program.get(), "spotLightAngleCos");
+        = glGetUniformLocation(programGBuf.get(), "spotLightAngleCos");
 }
 
 struct Model {
@@ -473,7 +474,7 @@ int main() {
         glm::mat4 matProj = glm::perspective(
             glm::radians(fov), 1.0f * width / height, 100.0f, 0.001f);
 
-        RaiiUseProgram _bind1(program.get());
+        RaiiUseProgram _bind1(programGBuf.get());
         glUniformMatrix4fv(uniformView, 1, GL_FALSE,
                            reinterpret_cast<GLfloat *>(&matView));
         glUniformMatrix4fv(uniformProj, 1, GL_FALSE,
