@@ -19,8 +19,8 @@ inline void errorCallback(int error, const char *description) {
 }
 
 inline void APIENTRY glDebugOutput(GLenum source, GLenum type, unsigned int id,
-                            GLenum severity, GLsizei length,
-                            const char *message, const void *userParam) {
+                                   GLenum severity, GLsizei length,
+                                   const char *message, const void *userParam) {
     // ignore non-significant error/warning codes
     if (id == 131169 || id == 131185 || id == 131218 || id == 131204) return;
 
@@ -157,10 +157,10 @@ struct Shader {
         oss << ifs.rdbuf();
         std::string str = oss.str();
 
-        std::cout << "Compiling shader " << filepath
-                  << " with source code:\n"
-                     "////////////////////////////////\n"
-                  << str << "////////////////////////////////\n";
+        std::cout << "Compiling shader " << filepath << '\n';
+        // std::cout << " with source code:\n"
+        //              "////////////////////////////////\n"
+        //           << str << "////////////////////////////////\n";
 
         const GLchar *c_str = str.c_str();
         GLint len = str.size();
@@ -254,46 +254,34 @@ struct ShaderProgram {
     }
 };
 
-struct RaiiUseProgram {
-    RaiiUseProgram(const RaiiUseProgram &) = delete;
-    RaiiUseProgram &operator=(const RaiiUseProgram &) = delete;
+template <void(GLAD_API_PTR **glBindTarget)(GLenum, GLuint)>
+struct RaiiBind_Target {
+    RaiiBind_Target(const RaiiBind_Target &) = delete;
+    RaiiBind_Target &operator=(const RaiiBind_Target &) = delete;
 
-    RaiiUseProgram(GLuint idx) { glUseProgram(idx); }
-    ~RaiiUseProgram() { glUseProgram(0); }
-};
-
-struct RaiiBindBuffer {
-    RaiiBindBuffer(const RaiiBindBuffer &) = delete;
-    RaiiBindBuffer &operator=(const RaiiBindBuffer &) = delete;
-
-    RaiiBindBuffer(GLenum target, GLuint idx) : target(target) {
-        glBindBuffer(target, idx);
+    RaiiBind_Target(GLenum target, GLuint idx) : target(target) {
+        (*glBindTarget)(target, idx);
     }
-    ~RaiiBindBuffer() { glBindBuffer(target, 0); }
+    ~RaiiBind_Target() { (*glBindTarget)(target, 0); }
 
   private:
     GLenum target;
 };
 
-struct RaiiBindTexture {
-    RaiiBindTexture(const RaiiBindTexture &) = delete;
-    RaiiBindTexture &operator=(const RaiiBindTexture &) = delete;
+using RaiiBindBuffer = RaiiBind_Target<&glBindBuffer>;
+using RaiiBindTexture = RaiiBind_Target<&glBindTexture>;
+using RaiiBindFramebuffer = RaiiBind_Target<&glBindFramebuffer>;
 
-    RaiiBindTexture(GLenum target, GLuint idx) : target(target) {
-        glBindTexture(target, idx);
-    }
-    ~RaiiBindTexture() { glBindTexture(target, 0); }
+template <void(GLAD_API_PTR **glBindNoTarget)(GLuint)>
+struct RaiiBind_NoTarget {
+    RaiiBind_NoTarget(const RaiiBind_NoTarget &) = delete;
+    RaiiBind_NoTarget &operator=(const RaiiBind_NoTarget &) = delete;
 
-  private:
-    GLenum target;
+    RaiiBind_NoTarget(GLuint idx) { (*glBindNoTarget)(idx); }
+    ~RaiiBind_NoTarget() { (*glBindNoTarget)(0); }
 };
 
-struct RaiiBindVao {
-    RaiiBindVao(const RaiiBindVao &) = delete;
-    RaiiBindVao &operator=(const RaiiBindVao &) = delete;
-
-    RaiiBindVao(GLuint idx) { glBindVertexArray(idx); }
-    ~RaiiBindVao() { glBindVertexArray(0); }
-};
+using RaiiUseProgram = RaiiBind_NoTarget<&glUseProgram>;
+using RaiiBindVao = RaiiBind_NoTarget<&glBindVertexArray>;
 
 #endif

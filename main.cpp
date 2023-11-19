@@ -1,4 +1,5 @@
 #include "routine.hpp"
+
 #include <algorithm>
 #include <map>
 #include <tuple>
@@ -26,7 +27,14 @@ constexpr float PI = glm::pi<float>();
 constexpr float TWO_PI = 2.0f * PI;
 constexpr float HALF_PI = 0.5f * PI;
 
+constexpr glm::vec2 FULL_SCREEN_TRIANGLE[] = {
+    {0.0f, 0.0f},
+    {2.0f, 0.0f},
+    {0.0f, 2.0f},
+};
+
 ShaderProgram programGBuf;
+ShaderProgram programScreen;
 
 GLuint uniformIsTextured = 0;
 GLuint uniformColorFactor = 0;
@@ -47,7 +55,7 @@ GLuint uniformSpotLightAngleCos = 0;
 void loadShaders() {
     Shader shaderGBufVert(GL_VERTEX_SHADER, "gbuf.vert");
     Shader shaderGBufFrag(GL_FRAGMENT_SHADER, "gbuf.frag");
-    programGBuf = ShaderProgram(shaderGBufVert.get(), shaderGBufFrag.get());
+    ShaderProgram programGBuf(shaderGBufVert.get(), shaderGBufFrag.get());
 
     uniformIsTextured = glGetUniformLocation(programGBuf.get(), "isTextured");
     uniformColorFactor = glGetUniformLocation(programGBuf.get(), "colorFactor");
@@ -56,17 +64,28 @@ void loadShaders() {
     uniformView = glGetUniformLocation(programGBuf.get(), "matView");
     uniformProj = glGetUniformLocation(programGBuf.get(), "matProj");
     uniformNormal = glGetUniformLocation(programGBuf.get(), "matNormal");
-    uniformMorphProgress = glGetUniformLocation(programGBuf.get(), "morphProgress");
+    uniformMorphProgress
+        = glGetUniformLocation(programGBuf.get(), "morphProgress");
 
     uniformDirLightDir = glGetUniformLocation(programGBuf.get(), "dirLightDir");
-    uniformDirLightColor = glGetUniformLocation(programGBuf.get(), "dirLightColor");
+    uniformDirLightColor
+        = glGetUniformLocation(programGBuf.get(), "dirLightColor");
 
-    uniformSpotLightPos = glGetUniformLocation(programGBuf.get(), "spotLightPos");
-    uniformSpotLightDir = glGetUniformLocation(programGBuf.get(), "spotLightDir");
+    uniformSpotLightPos
+        = glGetUniformLocation(programGBuf.get(), "spotLightPos");
+    uniformSpotLightDir
+        = glGetUniformLocation(programGBuf.get(), "spotLightDir");
     uniformSpotLightColor
         = glGetUniformLocation(programGBuf.get(), "spotLightColor");
     uniformSpotLightAngleCos
         = glGetUniformLocation(programGBuf.get(), "spotLightAngleCos");
+
+    Shader shaderScreenVert(GL_VERTEX_SHADER, "screen.vert");
+    Shader shaderScreenFrag(GL_FRAGMENT_SHADER, "screen.frag");
+    ShaderProgram programScreen(shaderScreenVert.get(), shaderScreenFrag.get());
+
+    ::programGBuf = std::move(programGBuf);
+    ::programScreen = std::move(programScreen);
 }
 
 struct Model {
@@ -223,6 +242,7 @@ struct Model {
 
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0,
                          format, type, img.image.data());
+            glGenerateMipmap(GL_TEXTURE_2D);
         }
     }
 
@@ -325,10 +345,16 @@ struct Model {
             bool hasTexture
                 = 0 <= texInfo.index && texInfo.index < textures.size();
 
-            GLuint texture = hasTexture ? textures[texInfo.index] : 0;
-            RaiiBindTexture _bind3(GL_TEXTURE_2D, texture);
+            if (hasTexture && expectTexture) {
+                GLuint texture = textures[texInfo.index];
+                glActiveTexture(GL_TEXTURE0);
+                RaiiBindTexture _bind3(GL_TEXTURE_2D, texture);
 
-            if (hasTexture == expectTexture) {
+                glDrawElements(
+                    prim.mode, accessor.count, accessor.componentType,
+                    static_cast<char *>(nullptr) + accessor.byteOffset);
+            }
+            if (!hasTexture && !expectTexture) {
                 glDrawElements(
                     prim.mode, accessor.count, accessor.componentType,
                     static_cast<char *>(nullptr) + accessor.byteOffset);
@@ -337,13 +363,74 @@ struct Model {
     }
 };
 
+constexpr GLsizei GBUF_SIZE = 2;
+GLuint gbuf[GBUF_SIZE];
+GLuint depthBuf;
+
 void framebufferSizeCallback(GLFWwindow *, int width, int height) {
     glViewport(0, 0, width, height);
+    for (GLsizei i = 0; i < GBUF_SIZE; ++i) {
+        RaiiBindTexture _bind(GL_TEXTURE_2D, gbuf[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RED,
+                     GL_UNSIGNED_BYTE, nullptr);
+    }
+    {
+        RaiiBindTexture _bind(GL_TEXTURE_2D, depthBuf);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, width, height, 0,
+                     GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    }
 }
 
 int main() {
-    glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
     loadShaders();
+
+    glGenTextures(GBUF_SIZE, gbuf);
+    glGenTextures(1, &depthBuf);
+
+    glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
+    {
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(window, &width, &height);
+        framebufferSizeCallback(window, width, height);
+    }
+
+    GLuint fullScreenVbo = 0;
+    GLuint fullScreenVao = 0;
+    glGenBuffers(1, &fullScreenVbo);
+    glGenVertexArrays(1, &fullScreenVao);
+    {
+        RaiiBindBuffer _bind1(GL_ARRAY_BUFFER, fullScreenVbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(FULL_SCREEN_TRIANGLE),
+                     FULL_SCREEN_TRIANGLE, GL_STATIC_DRAW);
+
+        RaiiBindVao _bind2(fullScreenVao);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+    }
+
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    {
+        RaiiBindFramebuffer _bind(GL_FRAMEBUFFER, fbo);
+        for (GLsizei i = 0; i < GBUF_SIZE; ++i) {
+            GLuint tex = gbuf[i];
+            RaiiBindTexture _bind(GL_TEXTURE_2D, tex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i,
+                                   GL_TEXTURE_2D, tex, 0);
+        }
+        {
+            RaiiBindTexture _bind(GL_TEXTURE_2D, depthBuf);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                   GL_TEXTURE_2D, depthBuf, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        }
+
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            throw std::runtime_error("Framebuffer incomplete");
+    }
 
     Model model;
     model.loadFrom("chess/chess.gltf");
@@ -455,10 +542,6 @@ int main() {
         if (ImGui::IsKeyDown(ImGuiKey_E)) { camPos.y += deltaTime * camSpeed; }
         if (ImGui::IsKeyDown(ImGuiKey_Q)) { camPos.y -= deltaTime * camSpeed; }
 
-        glClearColor(1.0f, 0.75f, 0.5f, 1.0f);
-        glClearDepth(0.0);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
         cycle += rotationSpeed * deltaTime;
         cycle = glm::fract(cycle);
         float rotAngle = TWO_PI * glm::smoothstep(0.0f, 1.0f, cycle);
@@ -474,14 +557,6 @@ int main() {
         glm::mat4 matProj = glm::perspective(
             glm::radians(fov), 1.0f * width / height, 100.0f, 0.001f);
 
-        RaiiUseProgram _bind1(programGBuf.get());
-        glUniformMatrix4fv(uniformView, 1, GL_FALSE,
-                           reinterpret_cast<GLfloat *>(&matView));
-        glUniformMatrix4fv(uniformProj, 1, GL_FALSE,
-                           reinterpret_cast<GLfloat *>(&matProj));
-        glUniform1f(uniformSpecularPow, specularPow);
-        glUniform1f(uniformMorphProgress, morphProgress);
-
         // We will calculate everything in view space,
         // where coordinates are still orthonormal
         glm::vec4 dlDir = matView * glm::vec4(glm::normalize(dirLightDir), 0);
@@ -493,28 +568,69 @@ int main() {
             = glm::cos(glm::radians(glm::vec2{spotLightPhi, spotLightTheta}));
         glm::vec3 slColor = spotLightIntensity * spotLightColor;
 
-        glUniform3f(uniformDirLightDir, dlDir.x, dlDir.y, dlDir.z);
-        glUniform3f(uniformDirLightColor, dlColor.x, dlColor.y, dlColor.z);
+        {
+            RaiiBindFramebuffer _bind1(GL_FRAMEBUFFER, fbo);
+            RaiiUseProgram _bind2(programGBuf.get());
 
-        glUniform3f(uniformSpotLightPos, slPos.x, slPos.y, slPos.z);
-        glUniform3f(uniformSpotLightDir, slDir.x, slDir.y, slDir.z);
-        glUniform3f(uniformSpotLightColor, slColor.x, slColor.y, slColor.z);
-        glUniform2f(uniformSpotLightAngleCos, slAngle.x, slAngle.y);
+            glEnable(GL_MULTISAMPLE);
+            glEnable(GL_DEPTH_TEST);
+            glEnable(GL_CULL_FACE);
 
-        glEnable(GL_MULTISAMPLE);
-        glEnable(GL_DEPTH_TEST);
-        // glEnable(GL_CULL_FACE);
+            glClearColor(1.0f, 0.75f, 0.5f, 1.0f);
+            glClearDepth(0.0);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        glDepthFunc(GL_GREATER);
-        glUniform1i(uniformIsTextured, 1);
-        model.drawPassTextured(matView, matModel);
-        glUniform1i(uniformIsTextured, 0);
-        model.drawPassFlat(matView, matModel);
+            glUniformMatrix4fv(uniformView, 1, GL_FALSE,
+                               reinterpret_cast<GLfloat *>(&matView));
+            glUniformMatrix4fv(uniformProj, 1, GL_FALSE,
+                               reinterpret_cast<GLfloat *>(&matProj));
+            glUniform1f(uniformSpecularPow, specularPow);
+            glUniform1f(uniformMorphProgress, morphProgress);
 
-        // glDisable(GL_CULL_FACE);
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_MULTISAMPLE);
+            glUniform3f(uniformDirLightDir, dlDir.x, dlDir.y, dlDir.z);
+            glUniform3f(uniformDirLightColor, dlColor.x, dlColor.y, dlColor.z);
+
+            glUniform3f(uniformSpotLightPos, slPos.x, slPos.y, slPos.z);
+            glUniform3f(uniformSpotLightDir, slDir.x, slDir.y, slDir.z);
+            glUniform3f(uniformSpotLightColor, slColor.x, slColor.y, slColor.z);
+            glUniform2f(uniformSpotLightAngleCos, slAngle.x, slAngle.y);
+
+            glDepthFunc(GL_GREATER);
+            glUniform1i(uniformIsTextured, 1);
+            model.drawPassTextured(matView, matModel);
+            glUniform1i(uniformIsTextured, 0);
+            model.drawPassFlat(matView, matModel);
+
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_MULTISAMPLE);
+        }
+
+        {
+            RaiiUseProgram _bind1(programScreen.get());
+            glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            RaiiBindVao _bind2(fullScreenVao);
+            for (GLsizei i = 0; i < GBUF_SIZE; ++i) {
+                glActiveTexture(GL_TEXTURE0 + i);
+                glBindTexture(GL_TEXTURE_2D, gbuf[i]);
+            }
+            glActiveTexture(GL_TEXTURE1);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            for (GLsizei i = 0; i < GBUF_SIZE; ++i) {
+                glActiveTexture(GL_TEXTURE0 + i);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+        }
     }
+
+    glDeleteFramebuffers(1, &fbo);
+    glDeleteTextures(GBUF_SIZE, gbuf);
+    glDeleteTextures(1, &depthBuf);
+
+    glDeleteVertexArrays(1, &fullScreenVao);
+    glDeleteBuffers(1, &fullScreenVbo);
 
     return 0;
 }
