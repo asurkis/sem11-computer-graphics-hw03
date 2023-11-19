@@ -14,6 +14,8 @@
 
 #include <tiny_gltf.h>
 
+RaiiContext _context;
+
 constexpr float PI = glm::pi<float>();
 constexpr float TWO_PI = 2.0f * PI;
 constexpr float HALF_PI = 0.5f * PI;
@@ -262,8 +264,6 @@ void loadShaders() {
 }
 
 int main() {
-    RaiiContext _context;
-
     loadShaders();
 
     tinygltf::Model model;
