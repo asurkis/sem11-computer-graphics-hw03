@@ -1,7 +1,5 @@
 #version 330 core
 
-in vec3 viewPosition;
-in vec3 normal;
 in vec2 texCoord0;
 
 uniform sampler2D gBaseColor;
@@ -9,6 +7,11 @@ uniform sampler2D gNormal;
 
 uniform sampler2D gDepth;
 uniform vec4 viewport; // width, height, zNear, zFar
+
+uniform sampler2D noiseTexture;
+
+uniform vec4 ambient; // with intensity + occlusion radius
+uniform int ssaoSamples;
 
 uniform float specularPow;
 
@@ -21,6 +24,11 @@ uniform vec3 spotLightColor; // with intensity
 uniform vec2 spotLightAngleCos; // cos(phi), cos(theta)
 
 out vec4 fragColor;
+
+vec3 viewPos;
+vec3 viewDir;
+vec3 normal;
+float depth;
 
 vec4 debugNormal(vec3 norm) {
     return vec4(0.5 + 0.5 * norm, 1);
@@ -41,55 +49,85 @@ float restoreZ(float depth) {
     // z = b / (depth - a)
     float a = viewport.z / (viewport.z - viewport.w);
     float b = -viewport.w * a;
-    return b / (depth - a);
+    return -b / (depth - a);
+}
+
+float calcAmbient() {
+    int misses = 1;
+    vec2 randomSamplePos = texCoord0;
+    for (int i = 0; i < ssaoSamples; ++i) {
+        vec4 randomVec = texture(noiseTexture, randomSamplePos);
+        randomSamplePos = randomVec.zw;
+
+        randomVec = 2 * randomVec - 1;
+        if (dot(randomVec, randomVec) > 1) continue;
+
+        vec3 offset = randomVec.xyz;
+        float dotNorm = dot(offset, normal);
+        if (dotNorm < 0)
+            offset -= 2 * dotNorm * normal;
+
+        vec3 pos = viewPos + ambient.w * offset;
+        vec2 uv = pos.xy / pos.z * 0.5 + 0.5;
+        float sampledDepth = texture(gDepth, uv).x;
+        float sampledZ = restoreZ(sampledDepth);
+        if (pos.z >= sampledZ)
+            misses++;
+    }
+    return misses / float(1 + ssaoSamples);
+}
+
+// diffuse + specular
+float calcDir() {
+    float dirDot = dot(-dirLightDir, normal);
+    vec3 halfway = normalize(viewDir + dirLightDir);
+    // vec3 dirReflectDir = reflect(dirLightDir, normal);
+    // float dirReflectDot = dot(-dirReflectDir, viewDir);
+    float reflectDot = dot(-halfway, normal);
+
+    float diffuse = max(0, dirDot);
+    float specular = pow(max(0, reflectDot), specularPow);
+
+    return diffuse + specular;
+}
+
+float calcSpot() {
+    vec3 fall = viewPos - spotLightPos;
+    vec3 fallDir = normalize(fall);
+    float dist2 = dot(fall, fall);
+    float fallCos = dot(fallDir, spotLightDir);
+    float spotCoverage = clamp(
+        (fallCos - spotLightAngleCos.x)
+        / (spotLightAngleCos.y - spotLightAngleCos.x),
+        0, 1);
+
+    float spotDot = dot(-fallDir, normal);
+    vec3 halfway = normalize(viewDir + fallDir);
+    // vec3 reflectDir = reflect(fallDir, normal);
+    // float reflectDot = dot(-reflectDir, viewDir);
+    float reflectDot = dot(-halfway, normal);
+
+    float diffuse = max(0, spotDot);
+    float specular = pow(max(0, reflectDot), specularPow);
+
+    return (diffuse + specular) / dist2;
 }
 
 void main() {
     vec4 baseColor = texture(gBaseColor, texCoord0);
-    vec3 normal = texture(gNormal, texCoord0).xyz;
-    float depth = texture(gDepth, texCoord0).x;
+    depth = texture(gDepth, texCoord0).x;
+    normal = 2 * texture(gNormal, texCoord0).xyz - 1;
     if (baseColor.w < 1) discard;
 
-    float random = fract(314 * sin(dot(gl_FragCoord.xy, vec2(3.14, 2.0))));
-    fragColor = vec4(random, 0, 0, 1);
-    return;
+    viewPos.z = restoreZ(depth);
+    viewPos.xy = viewPos.z * (texCoord0.xy * 2 - 1);
 
-    vec3 viewPosition;
-    viewPosition.z = restoreZ(depth);
-    viewPosition.xy = viewPosition.z * (texCoord0.xy * 2 - 1);
+    viewDir = normalize(viewPos);
 
-    vec3 viewDir = normalize(viewPosition);
+    vec3 ambientColor = calcAmbient() * ambient.xyz;
+    vec3 dirColor = calcDir() * dirLightColor;
+    vec3 spotColor = calcSpot() * spotLightColor;
+    vec3 combined = ambientColor + dirColor + spotColor;
 
-    float dirDot = dot(-dirLightDir, normal);
-    vec3 dirHalfway = normalize(viewDir + dirLightDir);
-    // vec3 dirReflectDir = reflect(dirLightDir, normal);
-    // float dirReflectDot = dot(-dirReflectDir, viewDir);
-    float dirReflectDot = dot(-dirHalfway, normal);
-
-    vec3 spotFall = viewPosition - spotLightPos;
-    vec3 spotFallDir = normalize(spotFall);
-    float spotDist2 = dot(spotFall, spotFall);
-    float spotFallCos = dot(spotFallDir, spotLightDir);
-    float spotCoverage = clamp(
-        (spotFallCos - spotLightAngleCos.x)
-        / (spotLightAngleCos.y - spotLightAngleCos.x),
-        0, 1);
-
-    float spotDot = dot(-spotFallDir, normal);
-    vec3 spotHalfway = normalize(viewDir + spotFallDir);
-    // vec3 spotReflectDir = reflect(spotFallDir, normal);
-    // float spotReflectDot = dot(-spotReflectDir, viewDir);
-    float spotReflectDot = dot(-spotHalfway, normal);
-
-    float dirDiffuse = max(0, dirDot);
-    float dirSpecular = pow(max(0, dirReflectDot), specularPow);
-
-    float spotDiffuse = max(0, spotDot);
-    float spotSpecular = pow(max(0, spotReflectDot), specularPow);
-
-    vec3 dirColor = (dirDiffuse + dirSpecular) * baseColor.xyz * dirLightColor;
-    vec3 spotColor = (spotDiffuse + spotSpecular) * baseColor.xyz * spotLightColor;
-
-    // fragColor = vec4(dirColor + spotColor, baseColor.w);
-    fragColor = debugNormal(spotFallDir);
+    fragColor = vec4(combined * baseColor.xyz, baseColor.w);
 }

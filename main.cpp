@@ -1,7 +1,9 @@
+#include "imgui.h"
 #include "routine.hpp"
 
 #include <algorithm>
 #include <map>
+#include <random>
 #include <tuple>
 #include <vector>
 
@@ -48,6 +50,9 @@ GLuint uniformGNormal = 0;
 GLuint uniformGDepth = 0;
 GLuint uniformZNearFar = 0;
 
+GLuint uniformNoiseTexture = 0;
+GLuint uniformAmbient = 0;
+GLuint uniformSsaoSamples = 0;
 GLuint uniformSpecularPow = 0;
 GLuint uniformMorphProgress = 0;
 GLuint uniformDirLightDir = 0;
@@ -66,35 +71,30 @@ void loadShaders() {
     Shader shaderScreenFrag(GL_FRAGMENT_SHADER, "screen.frag");
     ShaderProgram programScreen(shaderScreenVert.get(), shaderScreenFrag.get());
 
-    uniformIsTextured = glGetUniformLocation(programGBuf.get(), "isTextured");
-    uniformColorFactor = glGetUniformLocation(programGBuf.get(), "colorFactor");
+    uniformIsTextured = programGBuf.locateUniform("isTextured");
+    uniformColorFactor = programGBuf.locateUniform("colorFactor");
 
-    uniformMatModel = glGetUniformLocation(programGBuf.get(), "matModel");
-    uniformMatView = glGetUniformLocation(programGBuf.get(), "matView");
-    uniformMatProj = glGetUniformLocation(programGBuf.get(), "matProj");
-    uniformMatNormal = glGetUniformLocation(programGBuf.get(), "matNormal");
+    uniformMatModel = programGBuf.locateUniform("matModel");
+    uniformMatView = programGBuf.locateUniform("matView");
+    uniformMatProj = programGBuf.locateUniform("matProj");
+    uniformMatNormal = programGBuf.locateUniform("matNormal");
 
-    uniformGBaseColor = glGetUniformLocation(programScreen.get(), "gBaseColor");
-    uniformGNormal = glGetUniformLocation(programScreen.get(), "gNormal");
-    uniformGDepth = glGetUniformLocation(programScreen.get(), "gDepth");
-    uniformZNearFar = glGetUniformLocation(programScreen.get(), "viewport");
+    uniformGBaseColor = programScreen.locateUniform("gBaseColor");
+    uniformGNormal = programScreen.locateUniform("gNormal");
+    uniformGDepth = programScreen.locateUniform("gDepth");
+    uniformZNearFar = programScreen.locateUniform("viewport");
 
-    uniformSpecularPow
-        = glGetUniformLocation(programScreen.get(), "specularPow");
-    uniformMorphProgress
-        = glGetUniformLocation(programScreen.get(), "morphProgress");
-    uniformDirLightDir
-        = glGetUniformLocation(programScreen.get(), "dirLightDir");
-    uniformDirLightColor
-        = glGetUniformLocation(programScreen.get(), "dirLightColor");
-    uniformSpotLightPos
-        = glGetUniformLocation(programScreen.get(), "spotLightPos");
-    uniformSpotLightDir
-        = glGetUniformLocation(programScreen.get(), "spotLightDir");
-    uniformSpotLightColor
-        = glGetUniformLocation(programScreen.get(), "spotLightColor");
-    uniformSpotLightAngleCos
-        = glGetUniformLocation(programScreen.get(), "spotLightAngleCos");
+    uniformNoiseTexture = programScreen.locateUniform("noiseTexture");
+    uniformAmbient = programScreen.locateUniform("ambient");
+    uniformSsaoSamples = programScreen.locateUniform("ssaoSamples");
+    uniformSpecularPow = programScreen.locateUniform("specularPow");
+    uniformMorphProgress = programScreen.locateUniform("morphProgress");
+    uniformDirLightDir = programScreen.locateUniform("dirLightDir");
+    uniformDirLightColor = programScreen.locateUniform("dirLightColor");
+    uniformSpotLightPos = programScreen.locateUniform("spotLightPos");
+    uniformSpotLightDir = programScreen.locateUniform("spotLightDir");
+    uniformSpotLightColor = programScreen.locateUniform("spotLightColor");
+    uniformSpotLightAngleCos = programScreen.locateUniform("spotLightAngleCos");
 
     ::programGBuf = std::move(programGBuf);
     ::programScreen = std::move(programScreen);
@@ -225,8 +225,8 @@ struct Model {
             RaiiBindTexture _bind(GL_TEXTURE_2D, tex);
 
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
@@ -393,8 +393,32 @@ void framebufferSizeCallback(GLFWwindow *, int width, int height) {
     }
 }
 
+constexpr GLuint NOISE_TEXTURE_SIZE = 97;
+
 int main() {
     loadShaders();
+
+    GLuint noiseTexture = 0;
+    glGenTextures(1, &noiseTexture);
+    {
+        std::default_random_engine rng;
+        std::uniform_int_distribution<GLubyte> distrib;
+        std::vector<GLubyte> noise;
+        noise.reserve(4 * NOISE_TEXTURE_SIZE * NOISE_TEXTURE_SIZE);
+        for (size_t i = 0; i < 4 * NOISE_TEXTURE_SIZE * NOISE_TEXTURE_SIZE;
+             ++i) {
+            noise.push_back(distrib(rng));
+        }
+
+        RaiiBindTexture _bind(GL_TEXTURE_2D, noiseTexture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, NOISE_TEXTURE_SIZE,
+                     NOISE_TEXTURE_SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     noise.data());
+    }
 
     glGenTextures(GBUF_SIZE, gbuf);
     glGenTextures(1, &depthBuf);
@@ -450,6 +474,12 @@ int main() {
     glm::vec3 camPos = {0.0f, 0.0f, 1.0f};
     float camAngleX = 0.0f;
     float camAngleY = 0.0f;
+
+    glm::vec3 ambientColor = {1.0f, 1.0f, 1.0f};
+    float ambientIntensity = 2.0f;
+    int ssaoSamples = 32;
+    float ssaoRadius = 0.01f;
+
     float specularPow = 16.0f;
     float morphProgress = 0.0f;
     float fov = 45.0f;
@@ -458,14 +488,14 @@ int main() {
 
     glm::vec3 dirLightDir = {1.0f, -1.0f, -1.0f};
     glm::vec3 dirLightColor = {1.0f, 1.0f, 1.0f};
-    float dirLightIntensity = 2.5f;
+    float dirLightIntensity = 0.125f;
 
     glm::vec3 spotLightPos = {2.0f, 2.0f, 2.0f};
     glm::vec3 spotLightDir = {-1.0f, -1.0f, -1.0f};
     glm::vec3 spotLightColor = {0.0f, 1.0f, 1.0f};
     float spotLightPhi = 60.0f;
     float spotLightTheta = 45.0f;
-    float spotLightIntensity = 5.0f;
+    float spotLightIntensity = 0.125f;
 
     float rotationSpeed = 0.0f;
     float cycle = 0.0f;
@@ -477,10 +507,22 @@ int main() {
 
         ImGui::Begin("Info");
         ImGui::Text("FPS: %f", ImGui::GetIO().Framerate);
-        ImGui::SliderFloat("Camera speed", &camSpeed, 0.0f, 5.0f);
+        ImGui::SliderFloat("Camera speed", &camSpeed, 0.0f, 4.0f, "%.3f",
+                           ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("FOV", &fov, 15.0f, 90.0f);
         ImGui::SliderFloat("Specular power", &specularPow, 0.0f, 256.0f);
         ImGui::SliderFloat("Morph progress", &morphProgress, 0.0f, 1.0f);
+
+        if (ImGui::CollapsingHeader("Ambient light")) {
+            ImGui::ColorEdit4("AL Color", &ambientColor.x,
+                              ImGuiColorEditFlags_NoAlpha);
+            ImGui::SliderFloat("AL Intensity", &ambientIntensity, 0.0f, 8.0f,
+                               "%.3f", ImGuiSliderFlags_Logarithmic);
+            ImGui::SliderInt("SSAO Samples", &ssaoSamples, 0, 256, "%d",
+                             ImGuiSliderFlags_Logarithmic);
+            ImGui::SliderFloat("SSAO Radius", &ssaoRadius, 0.0f, 1.0f, "%.3f",
+                               ImGuiSliderFlags_Logarithmic);
+        }
 
         if (ImGui::CollapsingHeader("Directional light")) {
             ImGui::SliderFloat("DL Direction X", &dirLightDir.x, -1.0f, 1.0f);
@@ -488,21 +530,23 @@ int main() {
             ImGui::SliderFloat("DL Direction Z", &dirLightDir.z, -1.0f, 1.0f);
             ImGui::ColorEdit4("DL Color", &dirLightColor.x,
                               ImGuiColorEditFlags_NoAlpha);
-            ImGui::DragFloat("DL Intensity", &dirLightIntensity);
+            ImGui::SliderFloat("DL Intensity", &dirLightIntensity, 0.0f, 8.0f,
+                               "%.3f", ImGuiSliderFlags_Logarithmic);
         }
 
         if (ImGui::CollapsingHeader("Spot light")) {
-            ImGui::DragFloat("SL Position X", &spotLightPos.x);
-            ImGui::DragFloat("SL Position Y", &spotLightPos.y);
-            ImGui::DragFloat("SL Position Z", &spotLightPos.z);
+            ImGui::DragFloat("SL Position X", &spotLightPos.x, 0.125f);
+            ImGui::DragFloat("SL Position Y", &spotLightPos.y, 0.125f);
+            ImGui::DragFloat("SL Position Z", &spotLightPos.z, 0.125f);
             ImGui::SliderFloat("SL Direction X", &spotLightDir.x, -1.0f, 1.0f);
             ImGui::SliderFloat("SL Direction Y", &spotLightDir.y, -1.0f, 1.0f);
             ImGui::SliderFloat("SL Direction Z", &spotLightDir.z, -1.0f, 1.0f);
             ImGui::ColorEdit4("SL Color", &spotLightColor.x,
                               ImGuiColorEditFlags_NoAlpha);
-            ImGui::DragFloat("SL Phi", &spotLightPhi);
-            ImGui::DragFloat("SL Theta", &spotLightTheta);
-            ImGui::DragFloat("SL Intensity", &spotLightIntensity);
+            ImGui::DragFloat("SL Phi", &spotLightPhi, 0.125f);
+            ImGui::DragFloat("SL Theta", &spotLightTheta, 0.125f);
+            ImGui::SliderFloat("SL Intensity", &spotLightIntensity, 0.0f, 8.0f,
+                               "%.3f", ImGuiSliderFlags_Logarithmic);
         }
 
         ImGui::SliderFloat("Model rotation speed", &rotationSpeed, 0.0f, 1.0f);
@@ -572,6 +616,8 @@ int main() {
 
         // We will calculate everything in view space,
         // where coordinates are still orthonormal
+        glm::vec3 alColor = ambientIntensity * ambientColor;
+
         glm::vec4 dlDir = matView * glm::vec4(glm::normalize(dirLightDir), 0);
         glm::vec3 dlColor = dirLightIntensity * dirLightColor;
 
@@ -616,7 +662,6 @@ int main() {
 
         {
             RaiiUseProgram _bind1(programScreen.get());
-            glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
             glUniform1i(uniformGBaseColor, 0);
@@ -625,6 +670,10 @@ int main() {
             glUniform4f(uniformZNearFar, static_cast<GLfloat>(width),
                         static_cast<GLfloat>(height), zNearFar.x, zNearFar.y);
 
+            glUniform1i(uniformNoiseTexture, GBUF_SIZE + 1);
+            glUniform4f(uniformAmbient, alColor.x, alColor.y, alColor.z,
+                        ssaoRadius);
+            glUniform1i(uniformSsaoSamples, ssaoSamples);
             glUniform1f(uniformSpecularPow, specularPow);
             glUniform1f(uniformMorphProgress, morphProgress);
             glUniform3f(uniformDirLightDir, dlDir.x, dlDir.y, dlDir.z);
@@ -635,15 +684,19 @@ int main() {
             glUniform2f(uniformSpotLightAngleCos, slAngle.x, slAngle.y);
 
             RaiiBindVao _bind2(fullScreenVao);
+
             for (GLsizei i = 0; i < GBUF_SIZE; ++i) {
                 glActiveTexture(GL_TEXTURE0 + i);
                 glBindTexture(GL_TEXTURE_2D, gbuf[i]);
             }
             glActiveTexture(GL_TEXTURE0 + GBUF_SIZE);
             glBindTexture(GL_TEXTURE_2D, depthBuf);
+            glActiveTexture(GL_TEXTURE0 + GBUF_SIZE + 1);
+            glBindTexture(GL_TEXTURE_2D, noiseTexture);
+
             glDrawArrays(GL_TRIANGLES, 0, 3);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            for (GLsizei i = GBUF_SIZE; i-- > GBUF_SIZE;) {
+
+            for (GLsizei i = GBUF_SIZE + 2; i-- > GBUF_SIZE;) {
                 glActiveTexture(GL_TEXTURE0 + i);
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
@@ -656,6 +709,8 @@ int main() {
 
     glDeleteVertexArrays(1, &fullScreenVao);
     glDeleteBuffers(1, &fullScreenVbo);
+
+    glDeleteTextures(1, &noiseTexture);
 
     return 0;
 }

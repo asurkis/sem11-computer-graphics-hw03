@@ -239,6 +239,10 @@ struct ShaderProgram {
         return *this;
     }
 
+    GLuint locateUniform(const GLchar *name) const noexcept {
+        return glGetUniformLocation(get(), name);
+    }
+
   private:
     GLuint idx = 0;
 
