@@ -1,6 +1,8 @@
 #include "routine.hpp"
+#include <algorithm>
 #include <map>
 #include <tuple>
+#include <vector>
 
 #include <glm/common.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
@@ -19,211 +21,6 @@ RaiiContext _context;
 constexpr float PI = glm::pi<float>();
 constexpr float TWO_PI = 2.0f * PI;
 constexpr float HALF_PI = 0.5f * PI;
-
-void loadModel(tinygltf::Model &model, const std::string &path) {
-    std::string err;
-    std::string warn;
-    tinygltf::TinyGLTF loader;
-    bool ret = loader.LoadASCIIFromFile(&model, &err, &warn, path);
-
-    std::cout << warn << '\n' << err << '\n';
-
-    if (!ret) {
-        throw std::runtime_error("Could not load model");
-    }
-}
-
-void bindBufferViews(std::map<int, GLuint> &vbos,
-                     const tinygltf::Model &model) {
-    std::vector<bool> isVbo(model.bufferViews.size(), false);
-
-    for (auto &mesh : model.meshes) {
-        for (auto &prim : mesh.primitives) {
-            auto &idxAcc = model.accessors[prim.indices];
-            isVbo[idxAcc.bufferView] = true;
-            for (auto &[name, accessorId] : prim.attributes) {
-                auto &accessor = model.accessors[accessorId];
-                isVbo[accessor.bufferView] = true;
-            }
-        }
-    }
-
-    for (int i = 0; i < model.bufferViews.size(); ++i) {
-        auto &bufferView = model.bufferViews[i];
-        if (!isVbo[i]) {
-            continue;
-        }
-        if (bufferView.target == 0) {
-            continue;
-        }
-
-        auto &buffer = model.buffers[bufferView.buffer];
-        GLuint vbo = 0;
-        glGenBuffers(1, &vbo);
-        vbos[i] = vbo;
-
-        RaiiBindBuffer _bind(bufferView.target, vbo);
-        glBufferData(bufferView.target, bufferView.byteLength,
-                     &buffer.data[bufferView.byteOffset], GL_STATIC_DRAW);
-    }
-}
-
-void bindMesh(std::map<int, GLuint> &vbos, const tinygltf::Model &model,
-              const tinygltf::Mesh &mesh) {
-    for (auto &primitive : mesh.primitives) {
-        auto &idxAccessor = model.accessors[primitive.indices];
-
-        for (auto &[name, accessorId] : primitive.attributes) {
-            int vaa = -1;
-            if (name == "POSITION") {
-                vaa = 0;
-            } else if (name == "NORMAL") {
-                vaa = 1;
-            } else if (name == "TEXCOORD_0") {
-                vaa = 2;
-            } else {
-                std::cerr << "Unknown parameter " << name << '\n';
-                continue;
-            }
-
-            auto &accessor = model.accessors[accessorId];
-
-            int size = 1;
-            if (accessor.type != TINYGLTF_TYPE_SCALAR) {
-                size = accessor.type;
-            }
-
-            int byteStride =
-                accessor.ByteStride(model.bufferViews[accessor.bufferView]);
-
-            glBindBuffer(GL_ARRAY_BUFFER, vbos[accessor.bufferView]);
-            glEnableVertexAttribArray(vaa);
-            glVertexAttribPointer(
-                vaa, size, accessor.componentType,
-                accessor.normalized ? GL_TRUE : GL_FALSE, byteStride,
-                static_cast<char *>(nullptr) + accessor.byteOffset);
-        }
-    }
-}
-
-void bindModelNode(std::map<int, GLuint> &vbos, const tinygltf::Model &model,
-                   const tinygltf::Node &node) {
-    if (0 <= node.mesh && node.mesh < model.meshes.size()) {
-        auto &mesh = model.meshes[node.mesh];
-        bindMesh(vbos, model, mesh);
-    }
-    for (auto childId : node.children) {
-        auto &child = model.nodes[childId];
-        bindModelNode(vbos, model, child);
-    }
-}
-
-std::tuple<GLuint, GLuint, std::map<int, GLuint>>
-bindModel(const tinygltf::Model &model) {
-    std::map<int, GLuint> vbos;
-    GLuint vao = 0;
-    glGenVertexArrays(1, &vao);
-    {
-        RaiiBindVao _bind(vao);
-        auto &scene = model.scenes[model.defaultScene];
-        bindBufferViews(vbos, model);
-        for (auto nodeId : scene.nodes) {
-            auto &node = model.nodes[nodeId];
-            bindModelNode(vbos, model, node);
-        }
-    }
-
-    for (auto it = vbos.begin(); it != vbos.end();) {
-        auto &bufferView = model.bufferViews[it->first];
-        if (bufferView.target == GL_ELEMENT_ARRAY_BUFFER) {
-            ++it;
-        } else {
-            glDeleteBuffers(1, &it->second);
-            vbos.erase(it++);
-        }
-    }
-
-    GLuint texId = 0;
-    for (auto &tex : model.textures) {
-        glGenTextures(1, &texId);
-        auto &img = model.images[tex.source];
-        glBindTexture(GL_TEXTURE_2D, texId);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-        GLenum format = 0;
-        switch (img.component) {
-        case 1:
-            format = GL_RED;
-            break;
-        case 2:
-            format = GL_RG;
-            break;
-        case 3:
-            format = GL_RGB;
-            break;
-        case 4:
-            format = GL_RGBA;
-            break;
-        default:
-            throw std::runtime_error("Unexpected number of components");
-        }
-
-        GLenum type = 0;
-        switch (img.bits) {
-        case 8:
-            type = GL_UNSIGNED_BYTE;
-            break;
-        case 16:
-            type = GL_UNSIGNED_SHORT;
-            break;
-        default:
-            throw std::runtime_error("Unsupported image format");
-        }
-
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0,
-                     format, type, img.image.data());
-        glGenerateMipmap(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        break;
-    }
-
-    return {vao, texId, std::move(vbos)};
-}
-
-void drawModelMeshes(const std::map<int, GLuint> &ebos,
-                     const tinygltf::Model &model, const tinygltf::Mesh &mesh) {
-    for (auto &primitive : mesh.primitives) {
-        auto &accessor = model.accessors[primitive.indices];
-        RaiiBindBuffer _bind(GL_ELEMENT_ARRAY_BUFFER,
-                             ebos.at(accessor.bufferView));
-        glDrawElements(primitive.mode, accessor.count, accessor.componentType,
-                       static_cast<char *>(nullptr) + accessor.byteOffset);
-    }
-}
-
-void drawModelNodes(const std::map<int, GLuint> &ebos,
-                    const tinygltf::Model &model, const tinygltf::Node &node) {
-    auto &mesh = model.meshes[node.mesh];
-    drawModelMeshes(ebos, model, mesh);
-    for (auto &childId : node.children) {
-        auto &child = model.nodes[childId];
-        drawModelNodes(ebos, model, child);
-    }
-}
-
-void drawModel(GLuint vao, const std::map<int, GLuint> &ebos,
-               const tinygltf::Model &model) {
-    RaiiBindVao _bind(vao);
-    auto &scene = model.scenes[model.defaultScene];
-    for (auto &nodeId : scene.nodes) {
-        auto &node = model.nodes[nodeId];
-        drawModelNodes(ebos, model, node);
-    }
-}
 
 ShaderProgram program;
 
@@ -257,18 +54,249 @@ void loadShaders() {
 
     uniformSpotLightPos = glGetUniformLocation(program.get(), "spotLightPos");
     uniformSpotLightDir = glGetUniformLocation(program.get(), "spotLightDir");
-    uniformSpotLightColor =
-        glGetUniformLocation(program.get(), "spotLightColor");
-    uniformSpotLightAngleCos =
-        glGetUniformLocation(program.get(), "spotLightAngleCos");
+    uniformSpotLightColor
+        = glGetUniformLocation(program.get(), "spotLightColor");
+    uniformSpotLightAngleCos
+        = glGetUniformLocation(program.get(), "spotLightAngleCos");
 }
+
+struct Model {
+    ~Model() {
+        glDeleteVertexArrays(vaos.size(), vaos.data());
+        glDeleteBuffers(buffers.size(), buffers.data());
+        glDeleteTextures(textures.size(), textures.data());
+    }
+
+    void loadFrom(const std::string &path) {
+        loadModel(path);
+
+        auto &scene = model.scenes[model.defaultScene];
+        std::vector<bool> nodeUsed(model.nodes.size(), false);
+        for (int nodeId : scene.nodes) findUsedNodes(nodeUsed, nodeId);
+
+        createBuffersAndTextures(nodeUsed);
+
+        std::vector<bool> meshUsed(model.meshes.size(), false);
+        vaos.resize(model.meshes.size(), 0);
+
+        for (int nodeId = 0; nodeId < model.nodes.size(); ++nodeId) {
+            auto &node = model.nodes[nodeId];
+            if (nodeUsed[nodeId]) meshUsed[node.mesh] = true;
+        }
+        for (int meshId = 0; meshId < model.meshes.size(); ++meshId) {
+            if (meshUsed[meshId]) bindMesh(meshId);
+        }
+    }
+
+    void draw(const glm::mat4 &matModel) {
+        auto &scene = model.scenes[model.defaultScene];
+        for (int nodeId : scene.nodes) drawNode(matModel, nodeId);
+    }
+
+  private:
+    tinygltf::Model model;
+    std::vector<GLuint> vaos;
+    std::vector<GLuint> buffers;
+    std::vector<GLuint> textures;
+
+    void loadModel(const std::string &path) {
+        std::string err;
+        std::string warn;
+        tinygltf::TinyGLTF loader;
+        bool ret = loader.LoadASCIIFromFile(&model, &err, &warn, path);
+
+        std::cout << warn << '\n' << err << '\n';
+
+        if (!ret) { throw std::runtime_error("Could not load model"); }
+    }
+
+    void createBuffersAndTextures(const std::vector<bool> &nodeUsed) {
+        std::vector<bool> bufUsed(model.bufferViews.size(), false);
+        std::vector<bool> texUsed(model.textures.size(), false);
+
+        for (int nodeId = 0; nodeId < model.nodes.size(); ++nodeId) {
+            if (!nodeUsed[nodeId]) continue;
+            auto &node = model.nodes[nodeId];
+            auto &mesh = model.meshes[node.mesh];
+            for (auto &prim : mesh.primitives) {
+                auto &idxAcc = model.accessors[prim.indices];
+                if (idxAcc.ByteStride(model.bufferViews[idxAcc.bufferView])
+                    != tinygltf::GetComponentSizeInBytes(
+                        idxAcc.componentType)) {
+                    throw std::runtime_error(
+                        "Index buffer is not tightly packed");
+                }
+                bufUsed[idxAcc.bufferView] = true;
+
+                for (auto &[name, accessorId] : prim.attributes) {
+                    auto &accessor = model.accessors[accessorId];
+                    bufUsed[accessor.bufferView] = true;
+                }
+
+                auto &material = model.materials[prim.material];
+                auto &pbr = material.pbrMetallicRoughness;
+                auto &texInfo = pbr.baseColorTexture;
+                texUsed[texInfo.index] = true;
+            }
+        }
+
+        buffers.resize(model.bufferViews.size(), 0);
+        for (int bufferViewId = 0; bufferViewId < model.bufferViews.size();
+             ++bufferViewId) {
+            auto &bufferView = model.bufferViews[bufferViewId];
+            if (!bufUsed[bufferViewId]) continue;
+            if (bufferView.target == 0) continue;
+
+            auto &buffer = model.buffers[bufferView.buffer];
+            GLuint vbo = 0;
+            glGenBuffers(1, &vbo);
+            buffers[bufferViewId] = vbo;
+
+            RaiiBindBuffer _bind(bufferView.target, vbo);
+            glBufferData(bufferView.target, bufferView.byteLength,
+                         buffer.data.data() + bufferView.byteOffset,
+                         GL_STATIC_DRAW);
+        }
+
+        textures.resize(model.textures.size(), 0);
+        for (int textureId = 0; textureId < model.textures.size();
+             ++textureId) {
+            auto &texture = model.textures[textureId];
+            if (!texUsed[textureId]) continue;
+
+            GLuint tex = 0;
+            glGenTextures(1, &tex);
+            textures[textureId] = tex;
+
+            RaiiBindTexture _bind(GL_TEXTURE_2D, tex);
+
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+            auto &img = model.images[texture.source];
+            GLenum format = 0;
+            switch (img.component) {
+            case 1: format = GL_RED; break;
+            case 2: format = GL_RG; break;
+            case 3: format = GL_RGB; break;
+            case 4: format = GL_RGBA; break;
+            default:
+                throw std::runtime_error("Unexpected number of components");
+            }
+
+            GLenum type = 0;
+            switch (img.pixel_type) {
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+                type = GL_UNSIGNED_BYTE;
+                break;
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+                type = GL_UNSIGNED_SHORT;
+                break;
+            default: throw std::runtime_error("Unsupported image format");
+            }
+
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0,
+                         format, type, img.image.data());
+        }
+    }
+
+    void findUsedNodes(std::vector<bool> &visited, int nodeId) {
+        if (visited[nodeId]) return;
+        visited[nodeId] = true;
+
+        auto &node = model.nodes[nodeId];
+        auto &mesh = model.meshes[node.mesh];
+        for (auto &prim : mesh.primitives) {
+            auto &idxAcc = model.accessors[prim.indices];
+            visited[idxAcc.bufferView] = true;
+            for (auto &[name, accessorId] : prim.attributes) {
+                auto &accessor = model.accessors[accessorId];
+                visited[accessor.bufferView] = true;
+            }
+        }
+
+        for (int nodeId : node.children) findUsedNodes(visited, nodeId);
+    }
+
+    void bindMesh(int meshId) {
+        GLuint vao = 0;
+        glGenVertexArrays(1, &vao);
+        vaos[meshId] = vao;
+
+        RaiiBindVao _bind(vao);
+
+        auto &mesh = model.meshes[meshId];
+
+        for (auto &prim : mesh.primitives) {
+            auto &idxAccessor = model.accessors[prim.indices];
+            for (auto &[name, accId] : prim.attributes) {
+                int vaa = -1;
+                if (name == "POSITION") {
+                    vaa = 0;
+                } else if (name == "NORMAL") {
+                    vaa = 1;
+                } else if (name == "TEXCOORD_0") {
+                    vaa = 2;
+                } else {
+                    std::cerr << "Unknown parameter " << name << '\n';
+                    continue;
+                }
+
+                auto &accessor = model.accessors[accId];
+
+                int size = 1;
+                if (accessor.type != TINYGLTF_TYPE_SCALAR) {
+                    size = accessor.type;
+                }
+
+                int byteStride = accessor.ByteStride(
+                    model.bufferViews[accessor.bufferView]);
+
+                glBindBuffer(GL_ARRAY_BUFFER, buffers[accessor.bufferView]);
+                glEnableVertexAttribArray(vaa);
+                glVertexAttribPointer(
+                    vaa, size, accessor.componentType,
+                    accessor.normalized ? GL_TRUE : GL_FALSE, byteStride,
+                    static_cast<char *>(nullptr) + accessor.byteOffset);
+            }
+        }
+    }
+
+    void drawNode(glm::mat4 matModel, int nodeId) {
+        auto &node = model.nodes[nodeId];
+        drawMesh(matModel, node.mesh);
+        for (int childId : node.children) drawNode(matModel, childId);
+    }
+
+    void drawMesh(const glm::mat4 &matModel, int meshId) {
+        auto &mesh = model.meshes[meshId];
+        RaiiBindVao _bind1(vaos[meshId]);
+        glUniformMatrix4fv(uniformModel, 1, GL_FALSE,
+                           reinterpret_cast<const GLfloat *>(&matModel));
+        for (auto &prim : mesh.primitives) {
+            auto &material = model.materials[prim.material];
+            auto &pbr = material.pbrMetallicRoughness;
+            auto &texInfo = pbr.baseColorTexture;
+            int textureId = texInfo.index;
+
+            auto &accessor = model.accessors[prim.indices];
+            RaiiBindBuffer _bind2(GL_ELEMENT_ARRAY_BUFFER,
+                                  buffers[accessor.bufferView]);
+            RaiiBindTexture _bind3(GL_TEXTURE_2D, textures[textureId]);
+            glDrawElements(prim.mode, accessor.count, accessor.componentType,
+                           static_cast<char *>(nullptr) + accessor.byteOffset);
+        }
+    }
+};
 
 int main() {
     loadShaders();
 
-    tinygltf::Model model;
-    loadModel(model, "model.gltf");
-    auto [vao, texId, idxBuffers] = bindModel(model);
+    Model model;
+    model.loadFrom("model.gltf");
 
     glm::vec3 camPos = {0.0f, 0.0f, 5.0f};
     float camAngleX = 0.0f;
@@ -358,9 +386,9 @@ int main() {
 
         // Calculate camera movement
         glm::vec3 camRight = {glm::cos(camAngleY), 0.0f, glm::sin(camAngleY)};
-        glm::vec3 camForward =
-            glm::vec3{camRight.z, 0.0f, -camRight.x} * glm::cos(camAngleX) +
-            glm::vec3{0.0f, glm::sin(camAngleX), 0.0f};
+        glm::vec3 camForward
+            = glm::vec3{camRight.z, 0.0f, -camRight.x} * glm::cos(camAngleX)
+              + glm::vec3{0.0f, glm::sin(camAngleX), 0.0f};
         glm::vec3 camUp = glm::cross(camRight, camForward);
 
         if (ImGui::IsKeyDown(ImGuiKey_W)) {
@@ -375,12 +403,8 @@ int main() {
         if (ImGui::IsKeyDown(ImGuiKey_A)) {
             camPos -= deltaTime * camSpeed * camRight;
         }
-        if (ImGui::IsKeyDown(ImGuiKey_E)) {
-            camPos.y += deltaTime * camSpeed;
-        }
-        if (ImGui::IsKeyDown(ImGuiKey_Q)) {
-            camPos.y -= deltaTime * camSpeed;
-        }
+        if (ImGui::IsKeyDown(ImGuiKey_E)) { camPos.y += deltaTime * camSpeed; }
+        if (ImGui::IsKeyDown(ImGuiKey_Q)) { camPos.y -= deltaTime * camSpeed; }
 
         glClearColor(1.0f, 0.75f, 0.5f, 1.0f);
         glClearDepth(0.0);
@@ -389,8 +413,8 @@ int main() {
         cycle += rotationSpeed * deltaTime;
         cycle = glm::fract(cycle);
         float rotAngle = TWO_PI * glm::smoothstep(0.0f, 1.0f, cycle);
-        glm::mat4 matModel =
-            glm::rotate(glm::mat4(1.0f), rotAngle, {1.0f, 0.0f, 0.0f});
+        glm::mat4 matModel
+            = glm::rotate(glm::mat4(1.0f), rotAngle, {1.0f, 0.0f, 0.0f});
 
         glm::mat4 matView(1.0f);
         matView[0] = glm::vec4(camRight, 0.0f);
@@ -404,8 +428,6 @@ int main() {
         glm::mat4 matNormal = glm::transpose(glm::inverse(matView * matModel));
 
         RaiiUseProgram _bind1(program.get());
-        glUniformMatrix4fv(uniformModel, 1, GL_FALSE,
-                           reinterpret_cast<GLfloat *>(&matModel));
         glUniformMatrix4fv(uniformView, 1, GL_FALSE,
                            reinterpret_cast<GLfloat *>(&matView));
         glUniformMatrix4fv(uniformProj, 1, GL_FALSE,
@@ -422,10 +444,10 @@ int main() {
         glm::vec3 dlColor = dirLightIntensity * dirLightColor;
 
         glm::vec4 slPos = matView * glm::vec4(spotLightPos, 1);
-        glm::vec4 slDir =
-            matNormal * glm::vec4(glm::normalize(spotLightDir), 0);
-        glm::vec2 slAngle =
-            glm::cos(glm::radians(glm::vec2{spotLightPhi, spotLightTheta}));
+        glm::vec4 slDir
+            = matNormal * glm::vec4(glm::normalize(spotLightDir), 0);
+        glm::vec2 slAngle
+            = glm::cos(glm::radians(glm::vec2{spotLightPhi, spotLightTheta}));
         glm::vec3 slColor = spotLightIntensity * spotLightColor;
 
         glUniform3f(uniformDirLightDir, dlDir.x, dlDir.y, dlDir.z);
@@ -441,20 +463,11 @@ int main() {
         // glEnable(GL_CULL_FACE);
 
         glDepthFunc(GL_GREATER);
-        glBindTexture(GL_TEXTURE_2D, texId);
-        drawModel(vao, idxBuffers, model);
-        glBindTexture(GL_TEXTURE_2D, 0);
+        model.draw(matModel);
 
         // glDisable(GL_CULL_FACE);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_MULTISAMPLE);
-    }
-
-    glDeleteVertexArrays(1, &vao);
-    glDeleteTextures(1, &texId);
-    // glDeleteBuffers(2, buffers);
-    for (auto [_pos, idx] : idxBuffers) {
-        glDeleteBuffers(1, &idx);
     }
 
     return 0;
