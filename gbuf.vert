@@ -19,6 +19,7 @@ out vec2 texCoord0;
 void main() {
     vec3 nextPos = normalize(inPosition);
     vec3 nextNormal = nextPos; // morphing to a sphere
+    nextPos *= 0.05;
 
     vec3 pos = mix(inPosition, nextPos, morphProgress);
     vec4 vp = matView * matModel * vec4(pos, 1);

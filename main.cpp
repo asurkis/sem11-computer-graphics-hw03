@@ -44,6 +44,7 @@ GLuint uniformMatModel = 0;
 GLuint uniformMatView = 0;
 GLuint uniformMatProj = 0;
 GLuint uniformMatNormal = 0;
+GLuint uniformMorphProgress = 0;
 
 GLuint uniformGBaseColor = 0;
 GLuint uniformGNormal = 0;
@@ -54,7 +55,6 @@ GLuint uniformNoiseTexture = 0;
 GLuint uniformAmbient = 0;
 GLuint uniformSsaoSamples = 0;
 GLuint uniformSpecularPow = 0;
-GLuint uniformMorphProgress = 0;
 GLuint uniformDirLightDir = 0;
 GLuint uniformDirLightColor = 0;
 GLuint uniformSpotLightPos = 0;
@@ -78,6 +78,7 @@ void loadShaders() {
     uniformMatView = programGBuf.locateUniform("matView");
     uniformMatProj = programGBuf.locateUniform("matProj");
     uniformMatNormal = programGBuf.locateUniform("matNormal");
+    uniformMorphProgress = programGBuf.locateUniform("morphProgress");
 
     uniformGBaseColor = programScreen.locateUniform("gBaseColor");
     uniformGNormal = programScreen.locateUniform("gNormal");
@@ -88,7 +89,6 @@ void loadShaders() {
     uniformAmbient = programScreen.locateUniform("ambient");
     uniformSsaoSamples = programScreen.locateUniform("ssaoSamples");
     uniformSpecularPow = programScreen.locateUniform("specularPow");
-    uniformMorphProgress = programScreen.locateUniform("morphProgress");
     uniformDirLightDir = programScreen.locateUniform("dirLightDir");
     uniformDirLightColor = programScreen.locateUniform("dirLightColor");
     uniformSpotLightPos = programScreen.locateUniform("spotLightPos");
@@ -648,6 +648,7 @@ int main() {
                                reinterpret_cast<GLfloat *>(&matView));
             glUniformMatrix4fv(uniformMatProj, 1, GL_FALSE,
                                reinterpret_cast<GLfloat *>(&matProj));
+            glUniform1f(uniformMorphProgress, morphProgress);
 
             glDepthFunc(GL_GREATER);
             glUniform1i(uniformIsTextured, 1);
@@ -675,7 +676,6 @@ int main() {
                         ssaoRadius);
             glUniform1i(uniformSsaoSamples, ssaoSamples);
             glUniform1f(uniformSpecularPow, specularPow);
-            glUniform1f(uniformMorphProgress, morphProgress);
             glUniform3f(uniformDirLightDir, dlDir.x, dlDir.y, dlDir.z);
             glUniform3f(uniformDirLightColor, dlColor.x, dlColor.y, dlColor.z);
             glUniform3f(uniformSpotLightPos, slPos.x, slPos.y, slPos.z);
